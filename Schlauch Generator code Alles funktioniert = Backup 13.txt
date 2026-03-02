@@ -1,0 +1,3287 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Schlauchfiguren - Baukasten & Übung</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Three.js Basis -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
+    
+    <!-- Three.js Post-Processing (Tiefenunschärfe & SSAO) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/BokehShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/BokehPass.js"></script>
+    
+    <!-- SSAO (Umgebungsverdeckung) Module -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/math/SimplexNoise.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/SSAOShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/SSAOPass.js"></script>
+
+    <!-- FXAA (Fast Approximate Anti-Aliasing) Kantenglättung -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/FXAAShader.js"></script>
+
+    <!-- jsPDF für den PDF-Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a202c; }
+        .panel { background-color: rgba(31, 41, 55, 0.95); padding: 1rem; border-radius: 0.5rem; max-height: 85vh; overflow-y: auto; pointer-events: auto; }
+        input[type=range] { width: 100%; margin-top: 0.2rem; accent-color: #3b82f6; cursor: pointer; }
+        .ui-layer { pointer-events: none; }
+        .ui-layer button, .ui-layer select, .ui-layer input, .ui-layer label, .panel { pointer-events: auto; }
+        #confirm-modal { pointer-events: auto; }
+        
+        .panel::-webkit-scrollbar { width: 8px; }
+        .panel::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); border-radius: 4px; }
+        .panel::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.5); border-radius: 4px; }
+        .panel::-webkit-scrollbar-thumb:hover { background: rgba(156, 163, 175, 0.8); }
+
+        .sub-scroll::-webkit-scrollbar { width: 4px; }
+        .sub-scroll::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); border-radius: 2px; }
+        .sub-scroll::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.6); border-radius: 2px; }
+        .sub-scroll::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.9); }
+    </style>
+</head>
+<body class="text-white font-sans">
+
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container" class="absolute top-0 left-0 w-full h-full flex">
+        <div id="canvas-left" class="w-full h-full relative"></div>
+        <div id="canvas-right" class="w-0 h-full hidden border-l-4 border-gray-600 relative bg-gray-900"></div>
+    </div>
+
+    <!-- UI Overlay Layer -->
+    <div class="ui-layer absolute top-0 left-0 w-full h-full z-20">
+        
+        <!-- Main Header & Mode Switch -->
+        <div class="w-full p-4 flex justify-between items-start pointer-events-none">
+            <div class="w-1/3">
+                <h1 class="text-3xl font-bold drop-shadow-md pointer-events-auto">Schlauchfiguren</h1>
+                <p id="mode-desc" class="text-sm bg-black bg-opacity-70 px-3 py-2 mt-2 rounded shadow-lg max-w-sm pointer-events-auto">
+                    <strong>Editor:</strong> Klicke direkt auf den Schlauch, um einen neuen Punkt einzufügen! Ziehe die Punkte, um die Form zu ändern.
+                </p>
+            </div>
+            
+            <div class="bg-gray-800 rounded-lg p-1 shadow-2xl border border-gray-600 flex mt-1 pointer-events-auto">
+                <button id="btn-mode-editor" onclick="setMode('editor')" class="px-5 py-2 rounded-md bg-blue-600 text-white font-bold transition-colors">Editor</button>
+                <button id="btn-mode-practice" onclick="setMode('practice')" class="px-5 py-2 rounded-md text-gray-400 hover:text-white font-bold transition-colors">Ansichten-Vergleich</button>
+                <button id="btn-mode-selbsttest" onclick="setMode('selbsttest')" class="px-5 py-2 rounded-md text-gray-400 hover:text-white font-bold transition-colors">Selbsttest</button>
+            </div>
+            
+            <div class="w-1/3 flex flex-col justify-start items-end gap-2 pointer-events-auto">
+                <button id="export-btn" onclick="exportImage()" class="bg-blue-800 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded shadow-lg border border-blue-600 flex items-center gap-2 hidden transition-all">
+                    <span>📸</span> Als Bild exportieren
+                </button>
+                
+                <div class="flex items-center gap-3 bg-gray-800 p-1.5 rounded shadow-lg border border-gray-600 transition-all">
+                    <label class="flex items-center cursor-pointer text-xs font-bold text-gray-300 ml-2" title="Gilt für normales PDF. Der Drucker-Modus ist immer S/W.">
+                        <input type="checkbox" id="pdf-monochrome-toggle" checked onchange="document.getElementById('pdf-color-mode-text').innerText = this.checked ? 'Schlauchfiguren PDF in Schwarz/Weiß generieren' : 'Schlauchfiguren PDF farbig generieren'" class="mr-2 w-4 h-4 cursor-pointer accent-blue-500">
+                        <span id="pdf-color-mode-text">Schlauchfiguren PDF in Schwarz/Weiß generieren</span>
+                    </label>
+                    <button id="export-pdf-btn" onclick="generateTMSPDF(false)" class="bg-red-800 hover:bg-red-700 text-white font-bold py-2 px-3 rounded shadow border border-red-600 flex items-center gap-2 transition-all text-sm">
+                        <span>📄</span> 24-Aufgaben PDF
+                    </button>
+                    <button id="export-print-pdf-btn" onclick="generateTMSPDF(true)" class="bg-gray-200 hover:bg-white text-gray-900 font-bold py-2 px-3 rounded shadow border border-gray-400 flex items-center gap-2 transition-all text-sm">
+                        <span>🖨️</span> Papier Drucker Druckmodus
+                    </button>
+                </div>
+
+                <label id="allow-move-label" class="flex items-center cursor-pointer text-sm font-bold text-gray-300 hidden bg-gray-800 p-2 rounded shadow-lg border border-gray-600 transition-all">
+                    <input type="checkbox" id="allow-move-toggle" onchange="toggleTestMovement(this.checked)" class="mr-2 w-4 h-4 cursor-pointer accent-blue-500">
+                    Würfel bewegen erlauben
+                </label>
+            </div>
+        </div>
+
+        <button id="toggle-ui-btn" onclick="toggleEditorUI()" class="absolute top-24 right-4 bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-lg shadow-lg z-30 font-bold border border-gray-600 transition-colors pointer-events-auto">
+            ⚙️ Einstellungen verbergen
+        </button>
+
+        <!-- Editor Panel (Rechts) -->
+        <div id="editor-ui-panels" class="absolute top-36 right-4 flex flex-col gap-4 w-80 shadow-2xl border border-gray-600 panel transition-all duration-300">
+            
+            <div>
+                <h2 class="font-bold text-lg border-b border-gray-500 pb-1 mb-2 text-blue-300 cursor-pointer flex justify-between items-center hover:text-white transition-colors" onclick="toggleCategory('cat-speichern', this)">
+                    <span>Speichern & Laden</span>
+                    <span class="arrow-icon text-sm transform transition-transform duration-200">▼</span>
+                </h2>
+                <div id="cat-speichern" class="overflow-hidden">
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <button onclick="downloadSaveFile()" class="bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold py-2 px-1 rounded shadow transition-colors">💾 Speichern</button>
+                        <button id="btn-load-file" onclick="triggerFileUpload()" class="bg-gray-700 hover:bg-gray-600 text-white text-xs font-bold py-2 px-1 rounded shadow transition-colors">📂 Aus Datei</button>
+                        <input type="file" id="file-upload" accept=".json" class="hidden" onchange="handleFileUpload(event)">
+                    </div>
+                    <button onclick="wipeAllData()" class="w-full bg-red-900 hover:bg-red-800 text-white text-sm font-bold py-2 px-2 rounded shadow transition-colors">
+                        🗑️ Alles löschen (Neustart)
+                    </button>
+                </div>
+            </div>
+
+            <div>
+                <h2 class="font-bold text-lg border-b border-gray-500 pb-1 mb-2 text-purple-400 cursor-pointer flex justify-between items-center hover:text-white transition-colors" onclick="toggleCategory('cat-generator', this)">
+                    <span>Zufalls-Generator</span>
+                    <span class="arrow-icon text-sm transform transition-transform duration-200">▼</span>
+                </h2>
+                <div id="cat-generator" class="overflow-hidden">
+                    <div class="mb-2">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label>Dichte (Komplexität):</label>
+                            <span id="density-val" class="font-bold text-purple-300">5</span>
+                        </div>
+                        <input type="range" id="density-slider" min="1" max="10" value="5" step="1" oninput="document.getElementById('density-val').textContent = this.value" class="accent-purple-500">
+                    </div>
+                    
+                    <div class="mb-2">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label>Max. Dicke erlauben:</label>
+                            <span id="max-thick-val" class="font-bold text-purple-300">0.20</span>
+                        </div>
+                        <input type="range" id="max-thick-slider" min="0.02" max="1.50" value="0.20" step="0.02" oninput="document.getElementById('max-thick-val').textContent = parseFloat(this.value).toFixed(2)" class="accent-purple-500">
+                    </div>
+
+                    <div class="mb-2">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label>Max. Knick-Winkel:</label>
+                            <span id="max-angle-val" class="font-bold text-purple-300">180°</span>
+                        </div>
+                        <input type="range" id="max-angle-slider" min="0" max="360" value="180" step="5" oninput="document.getElementById('max-angle-val').textContent = this.value + '°'" class="accent-purple-500">
+                    </div>
+
+                    <div class="mb-4">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label>Max. Schlauch-Länge:</label>
+                            <span id="max-length-val" class="font-bold text-purple-300">130</span>
+                        </div>
+                        <input type="range" id="max-length-slider" min="20" max="400" value="130" step="5" oninput="document.getElementById('max-length-val').textContent = this.value" class="accent-purple-500">
+                    </div>
+
+                    <div class="mb-4 border-t border-gray-600 pt-3">
+                        <div class="flex justify-between items-center pb-1 mb-1">
+                            <h3 class="font-bold text-sm text-indigo-300 cursor-pointer flex items-center hover:text-white transition-colors" onclick="toggleSubCategory('subcat-styles', this)">
+                                <span>Erlaubte Schlauch-Arten</span>
+                                <span class="sub-arrow-icon text-xs transform transition-transform duration-200 ml-1.5" style="transform: rotate(-90deg);">▼</span>
+                            </h3>
+                            <div id="style-toggles" class="hidden text-[10px] gap-1.5">
+                                <button onclick="document.querySelectorAll('.generator-style-cb').forEach(cb=>cb.checked=true)" class="bg-indigo-900 hover:bg-indigo-700 text-white px-2 py-0.5 rounded shadow">Alle</button>
+                                <button onclick="document.querySelectorAll('.generator-style-cb').forEach(cb=>cb.checked=false)" class="bg-indigo-900 hover:bg-indigo-700 text-white px-2 py-0.5 rounded shadow">Keine</button>
+                            </div>
+                        </div>
+                        <div id="subcat-styles" class="hidden overflow-hidden max-h-40 overflow-y-auto pr-2 text-sm mb-2 sub-scroll">
+                            <!-- Dynamisch -->
+                        </div>
+                        <p class="text-[10px] text-gray-400 leading-tight">Kein Häkchen = Alle Arten werden zufällig genutzt.</p>
+                    </div>
+
+                    <div class="mb-4 border-t border-gray-600 pt-3">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label class="font-bold text-cyan-400">PDF-Aufgaben (Kipp / Dreh):</label>
+                            <span id="view-ratio-val" class="font-bold text-cyan-400">12 Kipp / 12 Dreh</span>
+                        </div>
+                        <input type="range" id="view-ratio-slider" min="0" max="24" value="12" step="1" oninput="updateViewRatioUI(this.value)" class="accent-cyan-500 mt-1">
+                    </div>
+
+                    <div class="mb-4 border-t border-gray-600 pt-3">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label class="font-bold text-pink-400">Besondere Muster:</label>
+                            <span id="pattern-prob-val" class="font-bold text-pink-400">0%</span>
+                        </div>
+                        <input type="range" id="pattern-prob-slider" min="0" max="100" value="0" step="5" oninput="document.getElementById('pattern-prob-val').textContent = this.value + '%'" class="accent-pink-500 mt-1">
+                        
+                        <div class="grid grid-cols-2 gap-1 text-xs text-gray-300 mt-2">
+                            <label class="flex items-center cursor-pointer hover:text-white"><input type="checkbox" id="pattern-kreis" class="mr-1 accent-pink-500" checked> Kreise / Loops</label>
+                            <label class="flex items-center cursor-pointer hover:text-white"><input type="checkbox" id="pattern-spirale" class="mr-1 accent-pink-500" checked> Spiralen</label>
+                            <label class="flex items-center cursor-pointer hover:text-white"><input type="checkbox" id="pattern-uturn" class="mr-1 accent-pink-500" checked> Haarnadel (U-Turn)</label>
+                            <label class="flex items-center cursor-pointer hover:text-white"><input type="checkbox" id="pattern-trefoil" class="mr-1 accent-pink-500" checked> Knoten (Trefoil)</label>
+                        </div>
+                    </div>
+
+                    <button onclick="promptRandomGeneration()" class="w-full bg-purple-700 hover:bg-purple-600 text-white text-sm font-bold py-2 px-2 rounded shadow transition-colors">
+                        🎲 Zufallsfigur generieren
+                    </button>
+                </div>
+            </div>
+
+            <!-- Ansicht & Effekte -->
+            <div>
+                <h2 class="font-bold text-lg border-b border-gray-500 pb-1 mb-2 text-blue-300 cursor-pointer flex justify-between items-center hover:text-white transition-colors" onclick="toggleCategory('cat-ansicht', this)">
+                    <span>Ansicht & Effekte</span>
+                    <span class="arrow-icon text-sm transform transition-transform duration-200">▼</span>
+                </h2>
+                <div id="cat-ansicht" class="overflow-hidden">
+                    <label class="flex items-center cursor-pointer text-sm font-bold text-gray-300 mb-3">
+                        <input type="checkbox" id="orientation-toggle" onchange="toggleOrientation(this.checked)" class="mr-2 w-4 h-4 cursor-pointer">
+                        Orientierungshilfe einblenden
+                    </label>
+
+                    <div class="mb-3">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label>3D-Auflösung (Glätte):</label>
+                            <span id="resolution-val" class="font-bold text-blue-300">Standard</span>
+                        </div>
+                        <input type="range" id="resolution-slider" min="10" max="80" value="30" step="10" onchange="updateAllFigures()" oninput="updateResolutionUI(this.value)">
+                    </div>
+
+                    <div class="mb-3 border-t border-gray-600 pt-2">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label class="text-indigo-300 font-bold" title="Unsichtbare Wände fangen realistische Schatten auf">Wandschatten (Tiefe):</label>
+                            <span id="shadow-opacity-val" class="font-bold text-indigo-300">0% (Aus)</span>
+                        </div>
+                        <input type="range" id="shadow-opacity-slider" min="0" max="100" value="0" step="5" onchange="updateShadowCatchers()" oninput="updateShadowCatchersUI(this.value)" class="accent-indigo-500 mt-1">
+                    </div>
+
+                    <div class="mb-3 border-t border-gray-600 pt-2">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label class="text-cyan-300 font-bold" title="Lässt den Glaskasten wie einen Spiegel wirken">Acryl-Spiegelung:</label>
+                            <span id="wall-reflection-val" class="font-bold text-cyan-300">0% (Matt)</span>
+                        </div>
+                        <input type="range" id="wall-reflection-slider" min="0" max="100" value="0" step="5" onchange="updateWallReflection()" oninput="updateWallReflectionUI(this.value)" class="accent-cyan-500 mt-1">
+                    </div>
+
+                    <div class="mb-3 border-t border-gray-600 pt-2">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label class="text-pink-300 font-bold" title="Berechnet weiche Kontaktschatten in Ecken (Kostet Leistung!)">Kontaktschatten (SSAO):</label>
+                            <span id="ssao-val" class="font-bold text-pink-300">0% (Aus)</span>
+                        </div>
+                        <input type="range" id="ssao-slider" min="0" max="100" value="0" step="5" onchange="updateSSAO()" oninput="updateSSAOUI(this.value)" class="accent-pink-500 mt-1">
+                    </div>
+
+                    <div class="mb-3 border-t border-gray-600 pt-2">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label class="text-teal-300 font-bold">Kanten-Realismus:</label>
+                            <span id="edge-realism-val" class="font-bold text-teal-300">0% (Klassisch)</span>
+                        </div>
+                        <input type="range" id="edge-realism-slider" min="0" max="100" value="0" step="1" onchange="updateEdgeRealism()" oninput="updateEdgeRealismUI(this.value)" class="accent-teal-500">
+                    </div>
+
+                    <div class="mb-3 border-t border-gray-600 pt-2">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label class="text-yellow-300 font-bold">Kontrast & Glanz:</label>
+                            <span id="contrast-val" class="font-bold text-yellow-300">50% (Normal)</span>
+                        </div>
+                        <input type="range" id="contrast-slider" min="0" max="100" value="50" step="1" onchange="updateContrast()" oninput="updateContrastUI(this.value)" class="accent-yellow-500">
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label>Beleuchtung:</label>
+                            <span id="exposure-val">Normal</span>
+                        </div>
+                        <input type="range" id="exposure-slider" min="-100" max="100" value="0" step="1" onchange="updateLighting()" oninput="updateLightingUI(this.value)">
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label>Tiefenunschärfe (Fokus):</label>
+                            <span id="blur-val">Aus</span>
+                        </div>
+                        <input type="range" id="blur-slider" min="0" max="100" value="0" step="1" onchange="updateBlur()" oninput="updateBlurUI(this.value)">
+                    </div>
+
+                    <div class="mb-4 border-b border-gray-600 pb-3">
+                        <div class="flex justify-between text-sm text-gray-300">
+                            <label class="text-orange-300 font-bold">2D-Abstraktion (Flat):</label>
+                            <span id="flat-val" class="text-orange-300">0%</span>
+                        </div>
+                        <input type="range" id="flat-slider" min="0" max="100" value="0" step="1" onchange="updateFlattening()" oninput="updateFlatteningUI(this.value)" class="accent-orange-500">
+                    </div>
+                    
+                    <div class="pt-1">
+                        <label class="flex items-center cursor-pointer text-sm font-bold text-white mb-1">
+                            <input type="checkbox" id="monochrome-toggle" onchange="toggleMonochrome(this.checked)" class="mr-2 w-4 h-4 cursor-pointer accent-blue-500">
+                            🎨 Alle Schläuche Schwarz/Weiß
+                        </label>
+                        <label class="flex items-center cursor-pointer text-sm font-bold text-gray-300 mb-1">
+                            <input type="checkbox" id="gray-mode-toggle" onchange="toggleGrayMode(this.checked)" class="mr-2 w-4 h-4 cursor-pointer">
+                            Nur inaktive Schläuche grau färben
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Schlauch-Verwaltung -->
+            <div>
+                <h2 class="font-bold text-lg border-b border-gray-500 pb-1 mb-2 text-blue-300 cursor-pointer flex justify-between items-center hover:text-white transition-colors" onclick="toggleCategory('cat-schlaeuche', this)">
+                    <span>Schlauch-Verwaltung</span>
+                    <span class="arrow-icon text-sm transform transition-transform duration-200">▼</span>
+                </h2>
+                <div id="cat-schlaeuche" class="overflow-hidden">
+                    <select id="figure-select" onchange="switchFigure(parseInt(this.value))" class="w-full bg-gray-700 text-white p-2 rounded mb-2 cursor-pointer border border-gray-600 focus:outline-none">
+                        <option value="-1">- Keine ausgewählt -</option>
+                    </select>
+
+                    <div class="flex gap-2">
+                        <button onclick="addNewFigure()" class="flex-1 bg-green-600 hover:bg-green-500 text-white text-sm font-bold py-2 px-2 rounded shadow">+ Neuer Schlauch</button>
+                        <button onclick="deleteActiveFigure()" class="flex-1 bg-red-800 hover:bg-red-700 text-white text-sm font-bold py-2 px-2 rounded shadow">Löschen</button>
+                    </div>
+
+                    <button onclick="finishEditing()" class="w-full mt-2 border border-gray-400 hover:bg-gray-700 text-white text-sm font-bold py-2 px-2 rounded shadow transition-colors mb-4">
+                        ✓ Bearbeitung abschließen
+                    </button>
+                    
+                    <div id="properties-panel" class="transition-opacity duration-300 pt-3 border-t border-gray-600">
+                        
+                        <input type="text" id="style-search" placeholder="🔍 Schlauch-Art suchen..." onkeyup="filterStyles()" class="w-full bg-gray-800 text-white p-2 rounded mb-1 text-sm border border-gray-600 focus:outline-none focus:border-blue-400">
+                        <select id="style-select" onchange="changeStyle(this.value)" class="w-full bg-gray-700 text-white p-2 rounded cursor-pointer border border-gray-600 mb-2">
+                        </select>
+                        
+                        <div id="premium-warning" class="hidden text-xs text-yellow-400 bg-yellow-900 bg-opacity-40 p-2 rounded mb-2 border border-yellow-700">
+                            ⚠️ <strong>Achtung:</strong> Premium-Texturen laden externe Bilddateien. Dies kann auf schwächeren Geräten die Performance reduzieren.
+                        </div>
+
+                        <div class="mb-2">
+                            <div class="flex justify-between text-sm text-gray-300"><label>Dicke:</label><span id="thickness-val">0.20</span></div>
+                            <input type="range" id="thickness-slider" min="0.02" max="1.5" step="0.02" onchange="updateThickness(this.value)" oninput="updateThickness(this.value)">
+                        </div>
+                        <div class="mb-4">
+                            <div class="flex justify-between text-sm text-gray-300"><label>Graustufe (Inaktiv):</label><span id="gray-val">50%</span></div>
+                            <input type="range" id="gray-slider" min="0.05" max="0.95" step="0.05" onchange="updateGray(this.value)" oninput="updateGray(this.value)">
+                        </div>
+
+                        <h3 class="font-bold text-sm mb-1 text-gray-300">Punkte bearbeiten</h3>
+                        <div class="text-xs text-green-400 mb-2 italic">Tipp: Klicke auf den Schlauch für neue Punkte!</div>
+                        <button onclick="addPoint()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded mb-2 shadow">+ Punkt ans Ende anfügen</button>
+                        <button onclick="removeSelectedPoint()" class="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded shadow">Ausgewählten Punkt löschen</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="bottom-ui-wrapper" class="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-0 hidden z-30 pointer-events-none w-max">
+            <button id="toggle-bottom-ui-btn" onclick="toggleBottomUI()" class="bg-gray-800 hover:bg-gray-700 text-gray-300 px-6 py-1.5 rounded-t-lg shadow-lg font-bold border border-gray-600 border-b-0 transition-all pointer-events-auto text-sm">
+                ⬇️ Menü verbergen
+            </button>
+            <div id="bottom-ui-content" class="pointer-events-auto transition-all duration-300 origin-bottom flex justify-center">
+                <div id="practice-ui" class="bg-gray-900 bg-opacity-95 p-4 rounded-b-lg rounded-t-sm shadow-2xl border border-gray-600 flex gap-12 hidden">
+                    <div class="flex flex-col gap-1">
+                        <span class="text-blue-400 font-bold text-sm">Linkes Bild (Referenz)</span>
+                        <select id="left-view-select" onchange="updateViewsFromSelects()" class="bg-gray-700 text-white p-2 rounded cursor-pointer font-bold border border-gray-500">
+                            <option value="vorne" selected>Ansicht: Vorne</option>
+                            <option value="rechts">Ansicht: Rechts (r)</option>
+                            <option value="links">Ansicht: Links (l)</option>
+                            <option value="oben">Ansicht: Oben (o)</option>
+                            <option value="unten">Ansicht: Unten (u)</option>
+                            <option value="hinten">Ansicht: Hinten (h)</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <span class="text-green-400 font-bold text-sm">Rechtes Bild (Aufgabe)</span>
+                        <select id="right-view-select" onchange="updateViewsFromSelects()" class="bg-gray-700 text-white p-2 rounded cursor-pointer font-bold border border-gray-500">
+                            <option value="vorne">Ansicht: Vorne</option>
+                            <option value="rechts" selected>Ansicht: Rechts (r)</option>
+                            <option value="links">Ansicht: Links (l)</option>
+                            <option value="oben">Ansicht: Oben (o)</option>
+                            <option value="unten">Ansicht: Unten (u)</option>
+                            <option value="hinten">Ansicht: Hinten (h)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="selbsttest-ui" class="bg-gray-900 bg-opacity-95 p-4 rounded-b-lg rounded-t-sm shadow-2xl border border-gray-600 w-[850px] hidden">
+                    <div class="flex justify-between items-center mb-4 border-b border-gray-600 pb-2">
+                        <div class="flex flex-col w-1/3">
+                            <span class="text-gray-400 font-bold text-xs uppercase tracking-wider">Erfolgs-Serie (Streak)</span>
+                            <span id="streak-counter" class="text-2xl font-black text-green-400">0</span>
+                        </div>
+                        <div class="flex flex-col items-center w-1/3">
+                            <span class="text-gray-500 font-bold text-xs uppercase tracking-wider">Modus</span>
+                            <span class="text-sm font-bold text-purple-400">Prüfungs-Simulation</span>
+                        </div>
+                        <div class="flex flex-col items-end w-1/3">
+                            <span class="text-gray-400 font-bold text-xs uppercase tracking-wider">Zeit (Timer)</span>
+                            <div class="flex items-center gap-3 mt-1">
+                                <span id="timer-display" class="text-2xl font-black text-blue-400 font-mono">0.0s</span>
+                                <button id="start-timer-btn" onclick="startTimer()" class="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-3 py-1.5 rounded shadow">Starten</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex justify-between items-center mb-4 border-b border-gray-600 pb-3">
+                        <div class="text-center w-1/3">
+                            <span class="text-blue-400 font-bold block mb-1">Neue Referenz (Vorne)</span>
+                            <div id="test-left-label" class="bg-blue-800 text-white py-1 px-3 rounded font-bold border border-blue-500 inline-block shadow-lg">Ursprung: Vorne</div>
+                            <div class="text-xs text-gray-400 mt-1">Gilt als neue "Vorne"-Ansicht</div>
+                        </div>
+                        <div class="text-center w-1/3">
+                            <span id="test-feedback" class="text-xl font-bold text-white uppercase tracking-wider block h-8">WELCHE ANSICHT IST DAS?</span>
+                        </div>
+                        <div class="text-center w-1/3">
+                            <span class="text-green-400 font-bold block mb-1">Aufgabe</span>
+                            <div class="bg-gray-800 text-white py-1 px-3 rounded font-bold border border-gray-500 inline-block">Ansicht: ???</div>
+                            <div class="text-xs text-gray-400 mt-1">(Relativ zur Referenz links)</div>
+                        </div>
+                    </div>
+                    <div class="flex justify-center gap-2 mb-4">
+                        <span class="text-white font-bold mr-2 self-center">Deine Antwort:</span>
+                        <button onclick="checkGuess('r')" class="bg-gray-600 hover:bg-gray-500 text-white py-1 px-3 rounded font-bold shadow">Rechts (r)</button>
+                        <button onclick="checkGuess('l')" class="bg-gray-600 hover:bg-gray-500 text-white py-1 px-3 rounded font-bold shadow">Links (l)</button>
+                        <button onclick="checkGuess('o')" class="bg-gray-600 hover:bg-gray-500 text-white py-1 px-3 rounded font-bold shadow">Oben (o)</button>
+                        <button onclick="checkGuess('u')" class="bg-gray-600 hover:bg-gray-500 text-white py-1 px-3 rounded font-bold shadow">Unten (u)</button>
+                        <button onclick="checkGuess('h')" class="bg-gray-600 hover:bg-gray-500 text-white py-1 px-3 rounded font-bold shadow">Hinten (h)</button>
+                    </div>
+                    <div class="flex justify-center gap-4 border-t border-gray-600 pt-3">
+                        <button onclick="randomizeSelfTest('right')" class="bg-indigo-600 hover:bg-indigo-500 text-white py-2 px-4 rounded font-bold shadow transition-colors">Nur rechte Ansicht zufällig</button>
+                        <button onclick="randomizeSelfTest('both')" class="bg-purple-600 hover:bg-purple-500 text-white py-2 px-4 rounded font-bold shadow transition-colors">Beide Ansichten zufällig</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="confirm-modal" class="absolute top-0 left-0 w-full h-full bg-black bg-opacity-80 z-50 flex items-center justify-center hidden pointer-events-auto">
+        <div class="bg-gray-800 border border-gray-600 p-6 rounded-lg shadow-2xl max-w-md w-full text-center transform transition-all">
+            <div class="text-5xl mb-4">⚠️</div>
+            <h3 class="text-2xl font-bold text-red-400 mb-2">Wirklich alles löschen?</h3>
+            <p class="text-gray-300 mb-8 text-sm px-4">Möchtest du deine aktuelle Schlauchfigur wirklich komplett löschen und neu anfangen? Dieser Vorgang kann nicht rückgängig gemacht werden.</p>
+            <div class="flex justify-center gap-4">
+                <button onclick="closeConfirmModal()" class="flex-1 bg-gray-600 hover:bg-gray-500 text-white px-4 py-3 rounded font-bold transition-colors">Abbrechen</button>
+                <button onclick="executeWipeData()" class="flex-1 bg-red-600 hover:bg-red-500 text-white px-4 py-3 rounded font-bold transition-colors">Ja, löschen!</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="generator-modal" class="absolute top-0 left-0 w-full h-full bg-black bg-opacity-80 z-50 flex items-center justify-center hidden pointer-events-auto">
+        <div class="bg-gray-800 border border-gray-600 p-6 rounded-lg shadow-2xl max-w-md w-full text-center transform transition-all">
+            <div class="text-5xl mb-4">🎲</div>
+            <h3 class="text-2xl font-bold text-purple-400 mb-2">Zufallsfigur generieren?</h3>
+            <p class="text-gray-300 mb-8 text-sm px-4">Achtung: Deine aktuelle Figur wird gelöscht. Hast du sie gespeichert?</p>
+            <div class="flex justify-center gap-4">
+                <button onclick="closeGeneratorModal()" class="flex-1 bg-gray-600 hover:bg-gray-500 text-white px-4 py-3 rounded font-bold transition-colors">Abbrechen</button>
+                <button onclick="confirmRandomGeneration()" class="flex-1 bg-purple-600 hover:bg-purple-500 text-white px-4 py-3 rounded font-bold transition-colors">Trotzdem generieren</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="pdf-modal" class="absolute top-0 left-0 w-full h-full bg-black bg-opacity-90 z-50 flex items-center justify-center hidden pointer-events-auto">
+        <div class="bg-gray-800 border border-gray-600 p-8 rounded-lg shadow-2xl max-w-lg w-full text-center">
+            <div class="text-6xl mb-6 animate-pulse">🖨️</div>
+            <h3 class="text-2xl font-bold text-blue-400 mb-2">TMS Simulation wird gedruckt</h3>
+            <p class="text-gray-300 mb-6 text-sm">Bitte warte einen Moment. Der Browser berechnet und fotografiert 24 Aufgaben. Dies kann ca. 10-20 Sekunden dauern...</p>
+            <div class="w-full bg-gray-700 rounded-full h-4 mb-2 overflow-hidden border border-gray-600">
+                <div id="pdf-progress-fill" class="bg-blue-500 h-4 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <div id="pdf-progress-text" class="text-xs font-bold text-gray-400 uppercase tracking-widest">Initialisiere...</div>
+        </div>
+    </div>
+
+    <script>
+        // --- Core Variables ---
+        let scene;
+        let ambientLight;
+        let dirLightL, dirLightR; 
+        let currentDirInt = 1.0;
+        let currentAmbInt = 0.6;
+        let flatteningAmount = 0.0;
+        let cubeEdges, glassCube;
+        let acrylicEdgesGroup, acrylicEdgeMaterial; 
+        
+        let shadowCatchersGroup;
+        let shadowMaterial;
+        let ssaoPassLeft, ssaoPassRight, ssaoPassPDF;
+        let fxaaPassLeft, fxaaPassRight, fxaaPassPDF;
+
+        let cubeCamera, cubeRenderTarget;
+        let needsEnvMapUpdate = true;
+        
+        let currentMode = 'editor';
+        let isEditorUIHidden = false; 
+        let isBottomUIHidden = false; 
+        
+        let rendererLeft, rendererRight;
+        let cameraLeft, cameraRight;
+        let frameLeft, frameRight; 
+        
+        let controlsLeft, controlsRight;
+        let composerLeft, composerRight;
+        let bokehPassLeft, bokehPassRight;
+        let usePostProcessing = false;
+
+        let pdfRenderer, pdfCamera, pdfComposer, pdfBokehPass;
+        let dirLightPDF; 
+
+        // --- TMS Logik & Statistik ---
+        const allBaseViews = ['vorne', 'hinten', 'rechts', 'links', 'oben', 'unten'];
+        const viewNames = { vorne: 'Vorne', hinten: 'Hinten', rechts: 'Rechts', links: 'Links', oben: 'Oben', unten: 'Unten' };
+        const relViewNames = { 'r': 'Rechts', 'l': 'Links', 'o': 'Oben', 'u': 'Unten', 'h': 'Hinten' };
+        
+        let currentLeftBaseView = 'vorne';
+        let currentRightBaseView = 'rechts'; 
+        let currentTestRelativeAnswer = 'r'; 
+        let currentStreak = 0;
+        let taskAnsweredCorrectly = false; 
+        
+        let timerInterval = null;
+        let timerElapsed = 0;
+
+        const viewDefs = {
+            'vorne':  { p: [0, 0, 15],  u: [0, 1, 0] },
+            'hinten': { p: [0, 0, -15], u: [0, 1, 0] },
+            'rechts': { p: [15, 0, 0],  u: [0, 1, 0] },
+            'links':  { p: [-15, 0, 0], u: [0, 1, 0] },
+            'oben':   { p: [0, 15, 0],  u: [0, 0, -1] },
+            'unten':  { p: [0, -15, 0], u: [0, 0, 1] }
+        };
+
+        let transformControl;
+        let raycaster, mouse;
+        let orientationSprites;
+        
+        let textureCache = {};
+        let extTextureCache = {};
+        const textureLoader = new THREE.TextureLoader();
+        
+        function getExternalTexture(url) {
+            if (!extTextureCache[url]) {
+                const tex = textureLoader.load(url, () => {
+                    needsEnvMapUpdate = true;
+                });
+                tex.wrapS = THREE.RepeatWrapping;
+                tex.wrapT = THREE.RepeatWrapping;
+                extTextureCache[url] = tex;
+            }
+            return extTextureCache[url];
+        }
+
+        let figures = [];
+        let activeFigureId = -1;
+        let nextFigureId = 0;
+        let selectedSphere = null;
+        let isGlobalGrayMode = false;
+        let isGlobalMonochrome = false; 
+
+        const colorPalette = [0xff4444, 0x44ff44, 0x4444ff, 0xffff44, 0xff44ff, 0x44ffff, 0xff9900];
+
+        const globalStylePool = [
+            { id: 'standard', name: 'Standard Schlauch', baseThickness: 0.20, type: 'normal' },
+            { id: 'standard_thick', name: 'Extra dicker Standard', baseStyle: 'standard', baseThickness: 0.65, type: 'thick' },
+            { id: 'flat', name: 'Plattes Band (Drachenzunge)', baseThickness: 0.15, type: 'normal' },
+            { id: 'barber', name: 'Gestreift (Barber Pole)', baseThickness: 0.25, type: 'normal' },
+            { id: 'hazard', name: 'Gefahrenkabel (Gelb/Schwarz)', baseThickness: 0.25, type: 'normal' }, 
+            { id: 'measure', name: 'Maßband / Markiert', baseThickness: 0.20, type: 'normal' }, 
+            { id: 'corrugated', name: 'Geriffeltes Leerrohr', baseThickness: 0.25, type: 'normal' }, 
+            { id: 'braided', name: 'Geflochtenes Nylon', baseThickness: 0.22, type: 'normal' }, 
+            { id: 'rusty', name: 'Verkrustet / Rostig', baseThickness: 0.22, type: 'normal' }, 
+            { id: 'coiled', name: 'Helix-Telefonkabel', baseThickness: 0.1, type: 'thin' }, 
+            { id: 'dotted', name: 'Gepunktetes Seil', baseThickness: 0.25, type: 'normal' },
+            { id: 'striped', name: 'Markierungslinie (Längs)', baseThickness: 0.25, type: 'normal' },
+            { id: 'wool', name: 'Wolle / Garn (Flauscheffekt)', baseThickness: 0.20, type: 'normal' }, 
+            { id: 'rope', name: 'Hanfseil (ausgefranst)', baseThickness: 0.22, type: 'normal' }, 
+            { id: 'rubber', name: 'Mattes Gummi', baseThickness: 0.30, type: 'thick' },
+            { id: 'glass', name: 'Transparenter Schlauch (Glas)', baseThickness: 0.35, type: 'thick' },
+            { id: 'neon', name: 'Leuchtschlauch (Neon)', baseThickness: 0.20, type: 'normal' },
+            { id: 'angular', name: 'Eckiges Rohr', baseThickness: 0.20, type: 'normal' },
+            { id: 'wire', name: 'Draht (metallisch)', baseThickness: 0.04, type: 'thin' },
+            { id: 'chain', name: 'Perlenkette (Kugeln)', baseThickness: 0.15, type: 'thin' },
+            { id: 'chainlink', name: 'Kette (ineinandergreifend)', baseThickness: 0.20, type: 'normal' },
+            { id: 'candy', name: 'Zuckerstange (Rot/Weiß)', baseThickness: 0.25, type: 'normal' }, 
+            { id: 'bamboo', name: 'Bambus-Rohr', baseThickness: 0.22, type: 'normal' }, 
+            { id: 'magma', name: 'Glühende Lava', baseThickness: 0.30, type: 'thick' }, 
+            { id: 'scifi', name: 'Sci-Fi Hologramm', baseThickness: 0.25, type: 'normal' }, 
+            { id: 'premium_carbon', name: '🌟 Premium: Kevlar-Kabel', baseThickness: 0.25, type: 'normal' },
+            { id: 'premium_rough', name: '🌟 Premium: Geriffelt', baseThickness: 0.25, type: 'normal' }
+        ];
+
+        function createStudioEnvironment() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = '#111115';
+            ctx.fillRect(0, 0, 1024, 512);
+            
+            ctx.filter = 'blur(40px)';
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(256, 0, 512, 150);
+            ctx.fillStyle = '#88aaff';
+            ctx.fillRect(0, 150, 150, 200);
+            ctx.fillStyle = '#ffaa88';
+            ctx.fillRect(874, 150, 150, 200);
+
+            const envTexture = new THREE.CanvasTexture(canvas);
+            envTexture.mapping = THREE.EquirectangularReflectionMapping;
+            scene.environment = envTexture; 
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color('#1a202c');
+            scene.fog = new THREE.FogExp2('#1a202c', 0);
+
+            createStudioEnvironment();
+
+            ambientLight = new THREE.AmbientLight(0xffffff, currentAmbInt);
+            scene.add(ambientLight);
+
+            cubeRenderTarget = new THREE.WebGLCubeRenderTarget(256, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter });
+            cubeCamera = new THREE.CubeCamera(0.1, 100, cubeRenderTarget);
+            scene.add(cubeCamera);
+
+            const glassGeom = new THREE.BoxGeometry(6.01, 6.01, 6.01);
+            const glassMat = new THREE.MeshPhysicalMaterial({
+                color: 0xffffff,
+                metalness: 0.0,      
+                roughness: 1.0,      
+                transmission: 0.9,   
+                ior: 1.45,           
+                thickness: 1.5,      
+                transparent: true,
+                opacity: 1.0,        
+                clearcoat: 1.0, 
+                clearcoatRoughness: 0.1,
+                envMap: cubeRenderTarget.texture, 
+                envMapIntensity: 0.0, 
+                side: THREE.DoubleSide, 
+                depthWrite: false 
+            });
+            glassCube = new THREE.Mesh(glassGeom, glassMat);
+            scene.add(glassCube);
+
+            const boxGeometry = new THREE.BoxGeometry(6, 6, 6);
+            const edges = new THREE.EdgesGeometry(boxGeometry);
+            const lineMaterial = new THREE.LineBasicMaterial({ color: 0x888888, linewidth: 2 });
+            cubeEdges = new THREE.LineSegments(edges, lineMaterial);
+            scene.add(cubeEdges);
+
+            createAcrylicEdges();
+            createShadowCatchers(); 
+
+            createOrientationSprites();
+
+            const contLeft = document.getElementById('canvas-left');
+            cameraLeft = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            cameraLeft.position.set(0, 0, 15);
+
+            rendererLeft = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+            rendererLeft.setSize(window.innerWidth, window.innerHeight);
+            rendererLeft.setPixelRatio(window.devicePixelRatio);
+            rendererLeft.shadowMap.enabled = true;
+            rendererLeft.shadowMap.type = THREE.PCFSoftShadowMap;
+            contLeft.appendChild(rendererLeft.domElement);
+
+            controlsLeft = new THREE.OrbitControls(cameraLeft, rendererLeft.domElement);
+            controlsLeft.enableDamping = true;
+            controlsLeft.dampingFactor = 0.05;
+
+            const contRight = document.getElementById('canvas-right');
+            cameraRight = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            cameraRight.position.set(15, 0, 0); 
+
+            rendererRight = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+            rendererRight.setSize(window.innerWidth/2, window.innerHeight);
+            rendererRight.setPixelRatio(window.devicePixelRatio);
+            rendererRight.shadowMap.enabled = true;
+            rendererRight.shadowMap.type = THREE.PCFSoftShadowMap;
+            contRight.appendChild(rendererRight.domElement);
+
+            controlsRight = new THREE.OrbitControls(cameraRight, rendererRight.domElement);
+            controlsRight.enableDamping = true;
+            controlsRight.dampingFactor = 0.05;
+
+            dirLightL = createCameraLight();
+            cameraLeft.add(dirLightL);
+            scene.add(cameraLeft);
+
+            dirLightR = createCameraLight();
+            dirLightR.castShadow = false; 
+            cameraRight.add(dirLightR);
+            scene.add(cameraRight);
+
+            pdfRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+            pdfRenderer.setSize(1024, 1024);
+            pdfRenderer.setPixelRatio(1);
+            pdfRenderer.shadowMap.enabled = true;
+            pdfRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            
+            pdfCamera = new THREE.PerspectiveCamera(30, 1.0, 0.1, 1000); 
+            
+            dirLightPDF = createCameraLight();
+            dirLightPDF.intensity = 0; 
+            dirLightPDF.castShadow = false; 
+            pdfCamera.add(dirLightPDF);
+            scene.add(pdfCamera); 
+
+            frameLeft = createCameraFrame();
+            cameraLeft.add(frameLeft);
+            scene.add(cameraLeft);
+            frameRight = createCameraFrame();
+            cameraRight.add(frameRight);
+
+            try {
+                const renderPassL = new THREE.RenderPass(scene, cameraLeft);
+                ssaoPassLeft = new THREE.SSAOPass(scene, cameraLeft, window.innerWidth, window.innerHeight);
+                ssaoPassLeft.kernelRadius = 12;
+                ssaoPassLeft.minDistance = 0.005;
+                ssaoPassLeft.maxDistance = 0.1;
+                ssaoPassLeft.enabled = false; 
+                
+                // NEU: needsSwap = true ist zwingend nötig, da FXAA danach kommt!
+                bokehPassLeft = new THREE.BokehPass(scene, cameraLeft, { focus: 12.0, aperture: 0.0, maxblur: 0.0 });
+                bokehPassLeft.needsSwap = true;
+                fxaaPassLeft = new THREE.ShaderPass(THREE.FXAAShader); 
+                
+                composerLeft = new THREE.EffectComposer(rendererLeft);
+                composerLeft.addPass(renderPassL);
+                composerLeft.addPass(ssaoPassLeft);
+                composerLeft.addPass(bokehPassLeft);
+                composerLeft.addPass(fxaaPassLeft); 
+
+                const renderPassR = new THREE.RenderPass(scene, cameraRight);
+                ssaoPassRight = new THREE.SSAOPass(scene, cameraRight, window.innerWidth/2, window.innerHeight);
+                ssaoPassRight.kernelRadius = 12;
+                ssaoPassRight.minDistance = 0.005;
+                ssaoPassRight.maxDistance = 0.1;
+                ssaoPassRight.enabled = false;
+
+                // NEU: needsSwap = true
+                bokehPassRight = new THREE.BokehPass(scene, cameraRight, { focus: 12.0, aperture: 0.0, maxblur: 0.0 });
+                bokehPassRight.needsSwap = true;
+                fxaaPassRight = new THREE.ShaderPass(THREE.FXAAShader); 
+                
+                composerRight = new THREE.EffectComposer(rendererRight);
+                composerRight.addPass(renderPassR);
+                composerRight.addPass(ssaoPassRight);
+                composerRight.addPass(bokehPassRight);
+                composerRight.addPass(fxaaPassRight); 
+                
+                const renderPassPDF = new THREE.RenderPass(scene, pdfCamera);
+                ssaoPassPDF = new THREE.SSAOPass(scene, pdfCamera, 1024, 1024);
+                ssaoPassPDF.kernelRadius = 12;
+                ssaoPassPDF.minDistance = 0.005;
+                ssaoPassPDF.maxDistance = 0.1;
+                ssaoPassPDF.enabled = false;
+
+                // NEU: needsSwap = true
+                pdfBokehPass = new THREE.BokehPass(scene, pdfCamera, { focus: 12.0, aperture: 0.0, maxblur: 0.0 });
+                pdfBokehPass.needsSwap = true;
+                fxaaPassPDF = new THREE.ShaderPass(THREE.FXAAShader); 
+                
+                pdfComposer = new THREE.EffectComposer(pdfRenderer);
+                pdfComposer.addPass(renderPassPDF);
+                pdfComposer.addPass(ssaoPassPDF);
+                pdfComposer.addPass(pdfBokehPass);
+                pdfComposer.addPass(fxaaPassPDF); 
+
+                const pixelRatio = rendererLeft.getPixelRatio();
+                fxaaPassLeft.material.uniforms['resolution'].value.x = 1 / (window.innerWidth * pixelRatio);
+                fxaaPassLeft.material.uniforms['resolution'].value.y = 1 / (window.innerHeight * pixelRatio);
+                
+                fxaaPassRight.material.uniforms['resolution'].value.x = 1 / ((window.innerWidth/2) * pixelRatio);
+                fxaaPassRight.material.uniforms['resolution'].value.y = 1 / (window.innerHeight * pixelRatio);
+                
+                fxaaPassPDF.material.uniforms['resolution'].value.x = 1 / 1024;
+                fxaaPassPDF.material.uniforms['resolution'].value.y = 1 / 1024;
+
+                patchDepthPasses(bokehPassLeft, frameLeft);
+                patchDepthPasses(bokehPassRight, frameRight);
+                patchDepthPasses(pdfBokehPass, frameLeft); 
+                patchDepthPasses(ssaoPassLeft, frameLeft);
+                patchDepthPasses(ssaoPassRight, frameRight);
+                patchDepthPasses(ssaoPassPDF, frameLeft);
+                
+                usePostProcessing = true;
+            } catch(e) {
+                console.warn("PostProcessing nicht geladen.", e);
+                usePostProcessing = false;
+            }
+
+            setupEditorTools();
+            
+            window.addEventListener('resize', onWindowResize, false);
+            window.addEventListener('pointerdown', onPointerDown, false);
+
+            populateStyleDropdown();
+            populateStyleCheckboxes();
+
+            if (!tryLoadAutoSave()) {
+                addNewFigure();
+            }
+
+            animate();
+        }
+
+        function createShadowCatchers() {
+            shadowCatchersGroup = new THREE.Group();
+            
+            shadowMaterial = new THREE.ShadowMaterial({ 
+                opacity: 0.0, 
+                depthWrite: false, 
+                side: THREE.BackSide 
+            }); 
+            
+            const boxGeo = new THREE.BoxGeometry(5.99, 5.99, 5.99);
+            const shadowBox = new THREE.Mesh(boxGeo, shadowMaterial);
+            shadowBox.receiveShadow = true;
+            
+            shadowCatchersGroup.add(shadowBox);
+            scene.add(shadowCatchersGroup);
+        }
+
+        function updateShadowCatchersUI(val) {
+            let text = val + "%";
+            if (val == 0) text = "0% (Aus)";
+            else if (val == 50) text = "50% (Normal)";
+            else if (val == 100) text = "100% (Pechschwarz)";
+            document.getElementById('shadow-opacity-val').textContent = text;
+        }
+
+        function updateShadowCatchers() {
+            const val = parseFloat(document.getElementById('shadow-opacity-slider').value) / 100;
+            shadowMaterial.opacity = val;
+        }
+
+        function updateWallReflectionUI(val) {
+            let text = val + "%";
+            if (val == 0) text = "0% (Matt)";
+            else if (val == 50) text = "50% (Poliert)";
+            else if (val == 100) text = "100% (Spiegelnd)";
+            document.getElementById('wall-reflection-val').textContent = text;
+        }
+
+        function updateWallReflection() {
+            const val = parseFloat(document.getElementById('wall-reflection-slider').value) / 100;
+            
+            glassCube.material.roughness = THREE.MathUtils.lerp(1.0, 0.0, val);
+            glassCube.material.metalness = THREE.MathUtils.lerp(0.0, 0.5, val);
+            glassCube.material.envMapIntensity = THREE.MathUtils.lerp(0.0, 3.0, val);
+            
+            needsEnvMapUpdate = true;
+        }
+
+        function updateSSAOUI(val) {
+            let text = val + "%";
+            if (val == 0) text = "0% (Aus)";
+            else if (val == 50) text = "50% (Normal)";
+            else if (val == 100) text = "100% (Stark)";
+            document.getElementById('ssao-val').textContent = text;
+        }
+
+        function updateSSAO() {
+            if (!usePostProcessing) return;
+            const val = parseFloat(document.getElementById('ssao-slider').value) / 100;
+            
+            if (val === 0) {
+                ssaoPassLeft.enabled = false;
+                ssaoPassRight.enabled = false;
+                ssaoPassPDF.enabled = false;
+            } else {
+                ssaoPassLeft.enabled = true;
+                ssaoPassRight.enabled = true;
+                ssaoPassPDF.enabled = true;
+                
+                const radius = THREE.MathUtils.lerp(4, 24, val);
+                ssaoPassLeft.kernelRadius = radius;
+                ssaoPassRight.kernelRadius = radius;
+                ssaoPassPDF.kernelRadius = radius;
+            }
+        }
+
+        function patchDepthPasses(pass, frameToHide) {
+            if(!pass) return;
+            const origRender = pass.render.bind(pass);
+            pass.render = function(renderer, writeBuffer, readBuffer, deltaTime, maskActive) {
+                
+                const origRendererRender = renderer.render.bind(renderer);
+                renderer.render = function(scene, camera, renderTarget, forceClear) {
+                    
+                    const isDepthScan = !!scene.overrideMaterial;
+                    
+                    let cubeVis, edgesVis, acrylicVis, frameVis, shadowVis;
+                    
+                    if (isDepthScan) {
+                        cubeVis = glassCube.visible;
+                        edgesVis = cubeEdges.visible;
+                        acrylicVis = acrylicEdgesGroup ? acrylicEdgesGroup.visible : false;
+                        frameVis = frameToHide ? frameToHide.visible : false;
+                        shadowVis = shadowCatchersGroup ? shadowCatchersGroup.visible : false;
+                        
+                        glassCube.visible = false;
+                        cubeEdges.visible = false;
+                        if(acrylicEdgesGroup) acrylicEdgesGroup.visible = false;
+                        if(frameToHide) frameToHide.visible = false;
+                        if(shadowCatchersGroup) shadowCatchersGroup.visible = false; 
+                    }
+
+                    origRendererRender(scene, camera, renderTarget, forceClear);
+
+                    if (isDepthScan) {
+                        glassCube.visible = cubeVis;
+                        cubeEdges.visible = edgesVis;
+                        if(acrylicEdgesGroup) acrylicEdgesGroup.visible = acrylicVis;
+                        if(frameToHide) frameToHide.visible = frameVis;
+                        if(shadowCatchersGroup) shadowCatchersGroup.visible = shadowVis;
+                    }
+                };
+
+                origRender(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
+                
+                renderer.render = origRendererRender;
+            };
+        }
+
+        function serializeFigures() {
+            return figures.map(f => ({
+                id: f.id,
+                name: f.name,
+                style: f.style,
+                color: f.color,
+                thickness: f.thickness,
+                grayLevel: f.grayLevel,
+                points: f.controlSpheres.map(s => ({x: s.position.x, y: s.position.y, z: s.position.z}))
+            }));
+        }
+
+        function autoSave() {
+            if(figures.length === 0) return; 
+            const data = serializeFigures();
+            localStorage.setItem('schlauchfigur_autosave', JSON.stringify(data));
+        }
+
+        function loadFiguresFromData(data) {
+            figures.forEach(f => {
+                f.controlSpheres.forEach(s => scene.remove(s));
+                clearGroup(f.meshGroup);
+                scene.remove(f.meshGroup);
+            });
+            figures = [];
+            transformControl.detach();
+            selectedSphere = null;
+            
+            let maxId = -1;
+            data.forEach(fData => {
+                const newFigure = {
+                    id: fData.id, 
+                    name: fData.name, 
+                    controlSpheres: [], 
+                    meshGroup: new THREE.Group(),
+                    style: fData.style || 'standard', 
+                    color: fData.color || colorPalette[fData.id % colorPalette.length], 
+                    thickness: fData.thickness || 0.2, 
+                    grayLevel: fData.grayLevel || 0.5,
+                    curve: null 
+                };
+                scene.add(newFigure.meshGroup);
+                
+                fData.points.forEach(p => {
+                    const vec = new THREE.Vector3(p.x, p.y, p.z);
+                    addPointToFigure(newFigure, vec);
+                });
+                
+                figures.push(newFigure);
+                if(fData.id > maxId) maxId = fData.id;
+            });
+            
+            nextFigureId = maxId + 1;
+            updateUI();
+            if(figures.length > 0) switchFigure(figures[0].id);
+            updateAllFigures();
+        }
+
+        function tryLoadAutoSave() {
+            const saved = localStorage.getItem('schlauchfigur_autosave');
+            if (saved) {
+                try {
+                    const data = JSON.parse(saved);
+                    if (data && data.length > 0) {
+                        loadFiguresFromData(data);
+                        return true;
+                    }
+                } catch(e) {
+                    console.error("Fehler beim Laden des Auto-Saves", e);
+                }
+            }
+            return false;
+        }
+
+        function downloadSaveFile() {
+            const data = serializeFigures();
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data, null, 2));
+            const link = document.createElement('a');
+            link.setAttribute("href", dataStr);
+            link.setAttribute("download", "schlauchfigur_modell.json");
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        }
+
+        function triggerFileUpload() {
+            document.getElementById('file-upload').click();
+        }
+
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    loadFiguresFromData(data);
+                    event.target.value = ''; 
+                } catch(error) {
+                    const btn = document.getElementById('btn-load-file');
+                    const origText = btn.innerHTML;
+                    btn.innerHTML = "❌ Fehlerhaft!";
+                    btn.classList.add('bg-red-600');
+                    setTimeout(() => {
+                        btn.innerHTML = origText;
+                        btn.classList.remove('bg-red-600');
+                    }, 2500);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function wipeAllData() {
+            document.getElementById('confirm-modal').classList.remove('hidden');
+        }
+
+        function updateViewRatioUI(val) {
+            const dreh = parseInt(val);
+            const kipp = 24 - dreh;
+            document.getElementById('view-ratio-val').textContent = `${kipp} Kipp / ${dreh} Dreh`;
+        }
+
+        function closeConfirmModal() {
+            document.getElementById('confirm-modal').classList.add('hidden');
+        }
+
+        function executeWipeData() {
+            closeConfirmModal();
+            localStorage.removeItem('schlauchfigur_autosave');
+            
+            figures.forEach(f => {
+                f.controlSpheres.forEach(s => scene.remove(s));
+                clearGroup(f.meshGroup);
+                scene.remove(f.meshGroup);
+            });
+            figures = [];
+            transformControl.detach();
+            selectedSphere = null;
+            nextFigureId = 0;
+            
+            addNewFigure();
+        }
+
+        function promptRandomGeneration() {
+            document.getElementById('generator-modal').classList.remove('hidden');
+        }
+
+        function closeGeneratorModal() {
+            document.getElementById('generator-modal').classList.add('hidden');
+        }
+
+        function populateStyleDropdown() {
+            const select = document.getElementById('style-select');
+            if(!select) return;
+            select.innerHTML = ''; 
+            
+            globalStylePool.forEach(style => {
+                if (style.id === 'standard_thick') return;
+                
+                const opt = document.createElement('option');
+                opt.value = style.id;
+                opt.textContent = style.name;
+                select.appendChild(opt);
+            });
+        }
+
+        function populateStyleCheckboxes() {
+            const container = document.getElementById('subcat-styles');
+            if(!container) return;
+            container.innerHTML = ''; 
+            
+            globalStylePool.forEach(style => {
+                if (style.id === 'standard_thick') return; 
+
+                const label = document.createElement('label');
+                label.className = "flex items-start cursor-pointer hover:text-white text-gray-300 mb-1.5 leading-snug";
+                label.innerHTML = `<input type="checkbox" value="${style.id}" class="generator-style-cb mr-2 mt-0.5 accent-indigo-500 flex-shrink-0"> <span class="break-words">${style.name}</span>`;
+                container.appendChild(label);
+            });
+        }
+
+        function toggleSubCategory(id, headerEl) {
+            const content = document.getElementById(id);
+            const arrow = headerEl.querySelector('.sub-arrow-icon');
+            const toggles = document.getElementById('style-toggles'); 
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                if(toggles) { toggles.classList.remove('hidden'); toggles.classList.add('flex'); }
+                arrow.style.transform = 'rotate(0deg)';
+            } else {
+                content.classList.add('hidden');
+                if(toggles) { toggles.classList.add('hidden'); toggles.classList.remove('flex'); }
+                arrow.style.transform = 'rotate(-90deg)';
+            }
+        }
+
+        function confirmRandomGeneration() {
+            closeGeneratorModal();
+            const density = parseInt(document.getElementById('density-slider').value);
+            const maxThick = parseFloat(document.getElementById('max-thick-slider').value);
+            const maxLength = parseInt(document.getElementById('max-length-slider').value); 
+            const maxAngle = parseInt(document.getElementById('max-angle-slider').value);
+            
+            const patternProb = parseInt(document.getElementById('pattern-prob-slider').value);
+            let allowedPatterns = [];
+            if(document.getElementById('pattern-kreis').checked) allowedPatterns.push('kreis');
+            if(document.getElementById('pattern-spirale').checked) allowedPatterns.push('spirale');
+            if(document.getElementById('pattern-uturn').checked) allowedPatterns.push('uturn');
+            if(document.getElementById('pattern-trefoil').checked) allowedPatterns.push('trefoil');
+            
+            const checkedBoxes = document.querySelectorAll('.generator-style-cb:checked');
+            const selectedStyleIds = Array.from(checkedBoxes).map(cb => cb.value);
+            
+            clearCurrentFigure();
+            generateRandomFigure(density, maxThick, maxLength, maxAngle, patternProb, allowedPatterns, selectedStyleIds);
+        }
+
+        function clearCurrentFigure() {
+            figures.forEach(f => {
+                f.controlSpheres.forEach(s => {
+                    scene.remove(s);
+                    if(s.geometry) s.geometry.dispose();
+                    if(s.material) s.material.dispose();
+                });
+                
+                clearGroup(f.meshGroup);
+                scene.remove(f.meshGroup);
+            });
+            
+            figures = [];
+            transformControl.detach();
+            selectedSphere = null;
+            nextFigureId = 0;
+            activeFigureId = -1;
+            
+            updateUI();
+        }
+
+        function generateRandomFigure(density, maxThick, maxLength, maxAngle, patternProb = 0, allowedPatterns = [], selectedStyleIds = []) {
+            let minTubes = Math.max(1, Math.floor(density / 2.5)); 
+            let maxTubes = Math.max(1, density);                   
+            let tubeCount = Math.floor(Math.random() * (maxTubes - minTubes + 1)) + minTubes;
+            
+            let poolToUse = [...globalStylePool];
+            if (selectedStyleIds && selectedStyleIds.length > 0) {
+                if (selectedStyleIds.includes('standard')) selectedStyleIds.push('standard_thick');
+                poolToUse = poolToUse.filter(s => selectedStyleIds.includes(s.id));
+            }
+
+            let configs = [];
+            let thickCount = 0;
+            let availableColors = [...colorPalette]; 
+
+            for (let i = 0; i < tubeCount; i++) {
+                if (availableColors.length === 0) availableColors = [...colorPalette];
+                let colorIndex = Math.floor(Math.random() * availableColors.length);
+                let color = availableColors.splice(colorIndex, 1)[0];
+
+                let allowedStylesForThisTube = [...poolToUse];
+                
+                if (density >= 8) {
+                    if (thickCount >= 2) {
+                        let filtered = allowedStylesForThisTube.filter(s => s.type !== 'thick');
+                        if(filtered.length > 0) allowedStylesForThisTube = filtered; 
+                    } else {
+                        if (Math.random() > 0.3) {
+                            let filtered = allowedStylesForThisTube.filter(s => s.type === 'thin' || s.type === 'normal');
+                            if(filtered.length > 0) allowedStylesForThisTube = filtered;
+                        }
+                    }
+                } else if (density >= 4) {
+                    if (Math.random() > 0.8) {
+                        let filtered = allowedStylesForThisTube.filter(s => s.type !== 'thick');
+                        if(filtered.length > 0) allowedStylesForThisTube = filtered;
+                    }
+                }
+
+                let chosenStyle = allowedStylesForThisTube[Math.floor(Math.random() * allowedStylesForThisTube.length)];
+                if (chosenStyle.type === 'thick') thickCount++;
+
+                let finalThickness = chosenStyle.baseThickness * (0.8 + Math.random() * 0.4);
+                
+                if (density >= 8 && thickCount > 2 && chosenStyle.type === 'thick') {
+                    finalThickness *= 0.55; 
+                }
+                
+                finalThickness = Math.min(finalThickness, maxThick); 
+
+                configs.push({
+                    id: i,
+                    style: chosenStyle.baseStyle || chosenStyle.id,
+                    thickness: parseFloat(finalThickness.toFixed(3)),
+                    color: color,
+                    type: chosenStyle.type
+                });
+            }
+
+            let globalSegments = []; 
+            
+            configs.forEach(config => {
+                let points = calculateTubePoints(config, density, globalSegments, maxLength, maxAngle, patternProb, allowedPatterns); 
+                if (points.length >= 2) {
+                    buildFigureFromPoints(config, points);
+                }
+            });
+            
+            updateUI();
+            if (figures.length > 0) switchFigure(figures[0].id);
+            updateAllFigures();
+        }
+
+        function generateGeometricPattern(type, stepLength) {
+            let pts = [new THREE.Vector3(0, 0, 0)];
+            let currPt = new THREE.Vector3(0, 0, 0);
+            let currDir = new THREE.Vector3(0, 0, 1); 
+
+            let steps = 0;
+            let state = {};
+
+            if (type === 'kreis') {
+                steps = 15;
+                state.axis = new THREE.Vector3(1, 0, 0); 
+                state.drift = currDir.clone().multiplyScalar(0.2); 
+            } else if (type === 'spirale') {
+                steps = 24;
+                state.forward = currDir.clone();
+                state.radial = new THREE.Vector3(1, 0, 0);
+                state.angle = 0;
+            } else if (type === 'uturn') {
+                steps = 12;
+                state.axis = new THREE.Vector3(1, 0, 0);
+            } else if (type === 'trefoil') {
+                steps = 30;
+                state.forward = currDir.clone();
+                state.axis1 = new THREE.Vector3(1, 0, 0);
+                state.axis2 = new THREE.Vector3(0, 1, 0);
+                state.step = 0;
+            }
+
+            for (let i = 0; i < steps; i++) {
+                let testDir = new THREE.Vector3();
+                if (type === 'kreis') {
+                    testDir = currDir.clone().applyAxisAngle(state.axis, Math.PI / 6).normalize();
+                    testDir.add(state.drift).normalize();
+                } else if (type === 'spirale') {
+                    state.angle += Math.PI / 5;
+                    let rotRadial = state.radial.clone().applyAxisAngle(state.forward, state.angle);
+                    testDir = state.forward.clone().multiplyScalar(0.3).add(rotRadial.multiplyScalar(0.7)).normalize();
+                } else if (type === 'uturn') {
+                    testDir = currDir.clone().applyAxisAngle(state.axis, Math.PI / 12).normalize();
+                } else if (type === 'trefoil') {
+                    let t = (state.step / 30) * Math.PI * 4;
+                    state.step++;
+                    let off = state.axis1.clone().multiplyScalar(Math.sin(t) + 2 * Math.sin(2 * t))
+                        .add(state.axis2.clone().multiplyScalar(Math.cos(t) - 2 * Math.cos(2 * t)));
+                    testDir = state.forward.clone().multiplyScalar(0.15).add(off.multiplyScalar(0.5)).normalize();
+                }
+                
+                currPt.add(testDir.clone().multiplyScalar(stepLength));
+                currDir.copy(testDir);
+                pts.push(currPt.clone());
+            }
+            
+            return { points: pts, finalDir: currDir };
+        }
+
+        function calculateTubePoints(config, density, globalSegments, maxLength, maxAngle, patternProb, allowedPatterns) {
+            let points = [];
+            let numPoints = Math.floor(Math.random() * (maxLength * 0.3)) + Math.floor(maxLength * 0.7); 
+            let maxAngleRad = THREE.MathUtils.degToRad(maxAngle);
+
+            const maxBounds = 3.0 - config.thickness;
+            const stepLength = 0.3 + ((10 - density) * 0.03); 
+            
+            let currentPoint = new THREE.Vector3();
+            let startValid = false;
+            
+            for(let a = 0; a < 100; a++) {
+                currentPoint.set(
+                   (Math.random() - 0.5) * 2 * maxBounds,
+                   (Math.random() - 0.5) * 2 * maxBounds,
+                   (Math.random() - 0.5) * 2 * maxBounds
+                );
+                
+                if(!checkCollision(currentPoint, config.thickness, globalSegments, config.id, 0)) {
+                    startValid = true; 
+                    break;
+                }
+            }
+            
+            if(!startValid) return points; 
+            points.push(currentPoint.clone());
+
+            let currentDir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+
+            let activePattern = null;
+            let patternSteps = 0;
+            let patternState = {};
+
+            for(let i = 1; i < numPoints; i++) {
+                 if (patternSteps > 0) {
+                     patternSteps--;
+                     if (patternSteps === 0) activePattern = null;
+                 }
+
+                 if (!activePattern && allowedPatterns && allowedPatterns.length > 0) {
+                     if (Math.random() < (patternProb / 100) * 0.08) {
+                         
+                         let chosenPattern = allowedPatterns[Math.floor(Math.random() * allowedPatterns.length)];
+                         
+                         let localData = generateGeometricPattern(chosenPattern, stepLength);
+                         let blockFits = false;
+                         let bestWorldPoints = [];
+                         let bestWorldSegments = [];
+                         let bestFinalDir = new THREE.Vector3();
+
+                         for (let tryIdx = 0; tryIdx < 50; tryIdx++) {
+                             let alignQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), currentDir);
+                             let rollQuat = new THREE.Quaternion().setFromAxisAngle(currentDir, Math.random() * Math.PI * 2);
+                             let finalQuat = rollQuat.multiply(alignQuat);
+
+                             let worldPoints = [];
+                             let worldSegments = [];
+                             let isValid = true;
+                             let tempPoint = currentPoint.clone();
+
+                             for (let k = 1; k < localData.points.length; k++) {
+                                 let prevWP = tempPoint.clone();
+                                 let localOffset = localData.points[k].clone().sub(localData.points[k-1]);
+                                 localOffset.applyQuaternion(finalQuat);
+                                 let wp = prevWP.clone().add(localOffset);
+
+                                 if (Math.abs(wp.x) > maxBounds || Math.abs(wp.y) > maxBounds || Math.abs(wp.z) > maxBounds) {
+                                     isValid = false; break;
+                                 }
+
+                                 let fakeSegIdx = i + k; 
+                                 if (checkSegmentCollision(prevWP, wp, config.thickness, globalSegments.concat(worldSegments), config.id, fakeSegIdx)) {
+                                     isValid = false; break;
+                                 }
+
+                                 worldPoints.push(wp);
+                                 worldSegments.push({ tubeId: config.id, segIdx: fakeSegIdx, p1: prevWP, p2: wp, thickness: config.thickness });
+                                 tempPoint.copy(wp);
+                             }
+
+                             if (isValid) {
+                                 blockFits = true;
+                                 bestWorldPoints = worldPoints;
+                                 bestWorldSegments = worldSegments;
+                                 bestFinalDir = localData.finalDir.clone().applyQuaternion(finalQuat).normalize();
+                                 break;
+                             }
+                         }
+
+                         if (blockFits) {
+                             points.push(...bestWorldPoints);
+                             globalSegments.push(...bestWorldSegments);
+                             currentPoint.copy(bestWorldPoints[bestWorldPoints.length - 1]);
+                             currentDir.copy(bestFinalDir);
+                             i += bestWorldPoints.length; 
+                             continue; 
+                         } else {
+                             activePattern = chosenPattern;
+                             if(activePattern === 'kreis') {
+                                 patternSteps = 15; 
+                                 patternState.axis = new THREE.Vector3().crossVectors(currentDir, new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5)).normalize();
+                                 patternState.drift = currentDir.clone().multiplyScalar(0.2); 
+                             } else if (activePattern === 'spirale') {
+                                 patternSteps = 24;
+                                 patternState.forward = currentDir.clone();
+                                 patternState.radial = new THREE.Vector3().crossVectors(currentDir, new THREE.Vector3(1,0,0)).normalize();
+                                 if(patternState.radial.lengthSq() < 0.01) patternState.radial = new THREE.Vector3().crossVectors(currentDir, new THREE.Vector3(0,1,0)).normalize();
+                                 patternState.angle = 0;
+                             } else if (activePattern === 'uturn') {
+                                 patternSteps = 12; 
+                                 patternState.axis = new THREE.Vector3().crossVectors(currentDir, new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5)).normalize();
+                             } else if (activePattern === 'trefoil') {
+                                 patternSteps = 30;
+                                 patternState.forward = currentDir.clone();
+                                 patternState.axis1 = new THREE.Vector3().crossVectors(currentDir, new THREE.Vector3(0,1,0)).normalize();
+                                 if(patternState.axis1.lengthSq()<0.01) patternState.axis1 = new THREE.Vector3(1,0,0);
+                                 patternState.axis2 = new THREE.Vector3().crossVectors(currentDir, patternState.axis1).normalize();
+                                 patternState.step = 0;
+                             }
+                         }
+                     }
+                 }
+                 
+                 let nextPoint = new THREE.Vector3();
+                 let valid = false;
+                 let bestDir = new THREE.Vector3();
+                 let emergencyPoint = new THREE.Vector3();
+                 let emergencyDir = new THREE.Vector3();
+                 
+                 for(let a = 0; a < 100; a++) {
+                     let testDir;
+                     
+                     if (activePattern && a === 0) {
+                         if (activePattern === 'kreis') {
+                             testDir = currentDir.clone().applyAxisAngle(patternState.axis, Math.PI / 6).normalize(); 
+                             testDir.add(patternState.drift).normalize(); 
+                         } else if (activePattern === 'spirale') {
+                             patternState.angle += Math.PI / 5; 
+                             let rotRadial = patternState.radial.clone().applyAxisAngle(patternState.forward, patternState.angle);
+                             testDir = patternState.forward.clone().multiplyScalar(0.3).add(rotRadial.multiplyScalar(0.7)).normalize();
+                         } else if (activePattern === 'uturn') {
+                             testDir = currentDir.clone().applyAxisAngle(patternState.axis, Math.PI / 12).normalize();
+                         } else if (activePattern === 'trefoil') {
+                             let t = (patternState.step / 30) * Math.PI * 4; 
+                             patternState.step++;
+                             let off = patternState.axis1.clone().multiplyScalar(Math.sin(t) + 2*Math.sin(2*t))
+                                      .add(patternState.axis2.clone().multiplyScalar(Math.cos(t) - 2*Math.cos(2*t)));
+                             testDir = patternState.forward.clone().multiplyScalar(0.15).add(off.multiplyScalar(0.5)).normalize();
+                         }
+                     } else {
+                         if (activePattern) {
+                             activePattern = null;
+                             patternSteps = 0;
+                         }
+
+                         if (a > 20) {
+                             testDir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+                         } else {
+                             let steerSpread = 0.6 + (density * 0.08); 
+                             let randomSteer = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(steerSpread);
+                             testDir = currentDir.clone().add(randomSteer).normalize();
+                         }
+
+                         if (maxAngle < 360) {
+                             let currentAngle = currentDir.angleTo(testDir);
+                             if (currentAngle > maxAngleRad) {
+                                 let axis = new THREE.Vector3().crossVectors(currentDir, testDir).normalize();
+                                 if (axis.lengthSq() < 0.001) {
+                                     axis = new THREE.Vector3(1, 0, 0).cross(currentDir).normalize();
+                                     if (axis.lengthSq() < 0.001) axis = new THREE.Vector3(0, 1, 0).cross(currentDir).normalize();
+                                 }
+                                 testDir.copy(currentDir).applyAxisAngle(axis, maxAngleRad).normalize();
+                             }
+                         }
+                     }
+                     
+                     nextPoint.copy(currentPoint).add(testDir.clone().multiplyScalar(stepLength));
+                     
+                     let outOfBounds = false;
+                     if(Math.abs(nextPoint.x) > maxBounds) { testDir.x *= -1; outOfBounds = true; }
+                     if(Math.abs(nextPoint.y) > maxBounds) { testDir.y *= -1; outOfBounds = true; }
+                     if(Math.abs(nextPoint.z) > maxBounds) { testDir.z *= -1; outOfBounds = true; }
+                     
+                     if (outOfBounds) {
+                         testDir.normalize();
+                         nextPoint.copy(currentPoint).add(testDir.clone().multiplyScalar(stepLength));
+                         if(Math.abs(nextPoint.x) > maxBounds || Math.abs(nextPoint.y) > maxBounds || Math.abs(nextPoint.z) > maxBounds) {
+                             continue; 
+                         }
+                     }
+
+                     if (a === 0 || (!emergencyPoint.x && !emergencyPoint.y)) {
+                         emergencyPoint.copy(nextPoint);
+                         emergencyDir.copy(testDir);
+                     }
+                     
+                     if(checkSegmentCollision(currentPoint, nextPoint, config.thickness, globalSegments, config.id, i)) {
+                         continue; 
+                     }
+                     
+                     valid = true; 
+                     bestDir.copy(testDir);
+                     break;
+                 }
+                 
+                 if(!valid) { 
+                     nextPoint.copy(emergencyPoint);
+                     bestDir.copy(emergencyDir);
+                 }
+                 
+                 globalSegments.push({ 
+                     tubeId: config.id,
+                     segIdx: i,
+                     p1: currentPoint.clone(), 
+                     p2: nextPoint.clone(), 
+                     thickness: config.thickness 
+                 });
+                 
+                 currentPoint.copy(nextPoint);
+                 currentDir.copy(bestDir); 
+                 points.push(currentPoint.clone());
+            }
+            return points;
+        }
+
+        function checkSegmentCollision(p1, p2, radius, globalSegments, tubeId, segIdx) {
+            const samples = 4;
+            for(let i = 0; i <= samples; i++) {
+                let t = i / samples;
+                let samplePt = new THREE.Vector3().lerpVectors(p1, p2, t);
+                if(checkCollision(samplePt, radius, globalSegments, tubeId, segIdx)) return true;
+            }
+            return false;
+        }
+
+        function checkCollision(pt, radius, globalSegments, tubeId, segIdx) {
+            let closest = new THREE.Vector3();
+            for(let seg of globalSegments) {
+                if (seg.tubeId === tubeId && Math.abs(segIdx - seg.segIdx) <= 4) continue;
+                let line = new THREE.Line3(seg.p1, seg.p2);
+                line.closestPointToPoint(pt, true, closest);
+                let dist = pt.distanceTo(closest);
+                if(dist < (radius + seg.thickness + 0.02)) return true; 
+            }
+            return false;
+        }
+
+        function buildFigureFromPoints(config, points) {
+            const newFigure = {
+                id: nextFigureId++, 
+                name: `Zufalls-Schlauch ${config.id + 1} (${config.type})`, 
+                controlSpheres: [], 
+                meshGroup: new THREE.Group(),
+                style: config.style, 
+                color: config.color, 
+                thickness: config.thickness, 
+                grayLevel: 0.5,
+                curve: null 
+            };
+            scene.add(newFigure.meshGroup);
+            figures.push(newFigure);
+            
+            points.forEach(p => addPointToFigure(newFigure, p));
+        }
+
+        function createAcrylicEdges() {
+            acrylicEdgesGroup = new THREE.Group();
+            
+            acrylicEdgeMaterial = new THREE.MeshPhysicalMaterial({
+                color: 0xffffff,
+                metalness: 0.1,
+                roughness: 0.5, 
+                transmission: 0.9, 
+                thickness: 0.15, 
+                opacity: 0.8,
+                transparent: true,
+                clearcoat: 1.0,
+                clearcoatRoughness: 0.1,
+                envMap: cubeRenderTarget.texture, 
+                envMapIntensity: 2.0
+            });
+
+            const edgeThickness = 0.08; 
+            const edgeLength = 6.08; 
+            const geomX = new THREE.BoxGeometry(edgeLength, edgeThickness, edgeThickness);
+            const geomY = new THREE.BoxGeometry(edgeThickness, edgeLength, edgeThickness);
+            const geomZ = new THREE.BoxGeometry(edgeThickness, edgeThickness, edgeLength);
+
+            const positions = [-3, 3];
+            
+            for (let a of positions) {
+                for (let b of positions) {
+                    let mX = new THREE.Mesh(geomX, acrylicEdgeMaterial);
+                    mX.position.set(0, a, b);
+                    acrylicEdgesGroup.add(mX);
+
+                    let mY = new THREE.Mesh(geomY, acrylicEdgeMaterial);
+                    mY.position.set(a, 0, b);
+                    acrylicEdgesGroup.add(mY);
+
+                    let mZ = new THREE.Mesh(geomZ, acrylicEdgeMaterial);
+                    mZ.position.set(a, b, 0);
+                    acrylicEdgesGroup.add(mZ);
+                }
+            }
+            
+            scene.add(acrylicEdgesGroup);
+            acrylicEdgesGroup.visible = false; 
+        }
+
+        function updateEdgeRealismUI(val) {
+            let text = val + "%";
+            if (val == 0) text = "0% (Klassisch)";
+            else if (val == 50) text = "50% (Fotorealistisch)";
+            else if (val == 100) text = "100% (Hardcore)";
+            document.getElementById('edge-realism-val').textContent = text;
+            updateEdgeRealism();
+        }
+
+        function updateEdgeRealism() {
+            const val = parseInt(document.getElementById('edge-realism-slider').value);
+            
+            if (val === 0) {
+                cubeEdges.visible = true;
+                acrylicEdgesGroup.visible = false;
+            } else {
+                cubeEdges.visible = false;
+                acrylicEdgesGroup.visible = true;
+                
+                let factor = val / 100; 
+                
+                if (factor <= 0.5) {
+                    let t = factor / 0.5; 
+                    acrylicEdgeMaterial.roughness = THREE.MathUtils.lerp(0.8, 0.4, t);
+                    acrylicEdgeMaterial.opacity = THREE.MathUtils.lerp(0.9, 0.7, t);
+                    acrylicEdgeMaterial.transmission = THREE.MathUtils.lerp(0.5, 0.9, t);
+                } else {
+                    let t = (factor - 0.5) / 0.5; 
+                    acrylicEdgeMaterial.roughness = THREE.MathUtils.lerp(0.4, 0.02, t);
+                    acrylicEdgeMaterial.opacity = THREE.MathUtils.lerp(0.7, 0.1, t);
+                    acrylicEdgeMaterial.transmission = THREE.MathUtils.lerp(0.9, 1.0, t);
+                }
+                
+                needsEnvMapUpdate = true; 
+            }
+        }
+
+        function createCameraLight() {
+            const light = new THREE.DirectionalLight(0xffffff, currentDirInt);
+            light.position.set(3, 6, 0); 
+            light.castShadow = true;
+            light.shadow.mapSize.width = 1024;
+            light.shadow.mapSize.height = 1024;
+            light.shadow.bias = -0.001;
+            light.shadow.radius = 4; 
+            return light;
+        }
+
+        function createCameraFrame() {
+            const frameGeo = new THREE.EdgesGeometry(new THREE.PlaneGeometry(6, 6));
+            const frameMat = new THREE.LineBasicMaterial({ color: 0x00ffff, depthTest: false, transparent: true, opacity: 0.8, linewidth: 2 });
+            const frame = new THREE.LineSegments(frameGeo, frameMat);
+            frame.position.set(0, 0, -12); 
+            frame.visible = false;
+            return frame;
+        }
+
+        function applyFixedView(camera, controls, viewName) {
+            const def = viewDefs[viewName];
+            camera.position.set(...def.p);
+            camera.up.set(...def.u);
+            controls.target.set(0,0,0);
+            controls.update();
+        }
+
+        function exportImage() {
+            if (usePostProcessing) {
+                composerLeft.render();
+                composerRight.render();
+            } else {
+                rendererLeft.render(scene, cameraLeft);
+                rendererRight.render(scene, cameraRight);
+            }
+
+            const canvas = document.createElement('canvas');
+            const wL = rendererLeft.domElement.width;
+            const hL = rendererLeft.domElement.height;
+            const wR = rendererRight.domElement.width;
+            const hR = rendererRight.domElement.height;
+
+            canvas.width = wL + wR;
+            canvas.height = Math.max(hL, hR);
+
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#1a202c'; 
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.drawImage(rendererLeft.domElement, 0, 0);
+            ctx.drawImage(rendererRight.domElement, wL, 0);
+
+            ctx.strokeStyle = '#4b5563';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(wL, 0);
+            ctx.lineTo(wL, canvas.height);
+            ctx.stroke();
+
+            const link = document.createElement('a');
+            link.download = 'Schlauchfigur_Aufgabe.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        function takePDFPhoto(viewName) {
+            const def = viewDefs[viewName];
+            pdfCamera.position.set(...def.p);
+            pdfCamera.up.set(...def.u);
+            pdfCamera.lookAt(0,0,0);
+
+            const backupL = dirLightL.intensity;
+            const backupR = dirLightR.intensity;
+            const backupLCast = dirLightL.castShadow; 
+            const backupRCast = dirLightR.castShadow; 
+
+            dirLightL.intensity = 0;
+            dirLightL.castShadow = false; 
+            dirLightR.intensity = 0;
+            dirLightR.castShadow = false; 
+
+            if (dirLightPDF) {
+                dirLightPDF.intensity = currentDirInt;
+                dirLightPDF.castShadow = true; 
+                const flatX = THREE.MathUtils.lerp(3, 0.1, flatteningAmount);
+                const flatY = THREE.MathUtils.lerp(6, 0.1, flatteningAmount);
+                const flatZ = THREE.MathUtils.lerp(0, 5, flatteningAmount);
+                dirLightPDF.position.set(flatX, flatY, flatZ);
+            }
+
+            if (usePostProcessing) {
+                const blurAmount = parseFloat(document.getElementById('blur-slider').value) / 100;
+                const blurMultiplier = 1.0 + (flatteningAmount * 4.0); 
+                const aperture = blurAmount * 0.035 * blurMultiplier; 
+                const maxblur = blurAmount * 0.08 * blurMultiplier; 
+
+                pdfBokehPass.uniforms["focus"].value = 15.0; 
+                pdfBokehPass.uniforms["aperture"].value = aperture; 
+                pdfBokehPass.uniforms["maxblur"].value = maxblur;
+                pdfComposer.render();
+            } else {
+                pdfRenderer.render(scene, pdfCamera);
+            }
+
+            dirLightL.intensity = backupL;
+            dirLightL.castShadow = backupLCast; 
+            dirLightR.intensity = backupR;
+            dirLightR.castShadow = backupRCast; 
+            if (dirLightPDF) {
+                dirLightPDF.intensity = 0;
+                dirLightPDF.castShadow = false; 
+            }
+
+            return pdfRenderer.domElement.toDataURL('image/jpeg', 0.90);
+        }
+
+        async function generateTMSPDF(isPrintMode = false) {
+            const backupMode = currentMode;
+            if (currentMode === 'editor') {
+                setMode('practice');
+                await new Promise(r => setTimeout(r, 100)); 
+            }
+
+            const backupData = serializeFigures();
+            const backupMono = isGlobalMonochrome;
+            const backupBg = scene.background.clone();
+            const backupFog = scene.fog.color.clone();
+            const backupAmbInt = currentAmbInt;
+            const backupDirInt = currentDirInt;
+            const backupFrameL = frameLeft.visible;
+            const backupFrameR = frameRight.visible;
+            
+            // Backup der Glas-Eigenschaften für den Drucker-Modus
+            const backupGlassTransmission = glassCube.material.transmission;
+            const backupGlassOpacity = glassCube.material.opacity;
+            const backupGlassEnvMap = glassCube.material.envMap;
+            
+            document.getElementById('pdf-modal').classList.remove('hidden');
+            const progressFill = document.getElementById('pdf-progress-fill');
+            const progressText = document.getElementById('pdf-progress-text');
+
+            const pdfMonoChecked = document.getElementById('pdf-monochrome-toggle').checked;
+            isGlobalMonochrome = pdfMonoChecked;
+            
+            // Drucker Druckmodus ausführen (Weißer Hintergrund, einfaches Glas, Zwang zu S/W)
+            if (isPrintMode) {
+                scene.background = new THREE.Color('#ffffff');
+                scene.fog.color = new THREE.Color('#ffffff');
+                isGlobalMonochrome = true; 
+                
+                glassCube.material.transmission = 0.0;
+                glassCube.material.opacity = 0.15;
+                glassCube.material.envMap = null;
+                
+                updateAllFigures(); 
+            }
+            
+            frameLeft.visible = false;
+            frameRight.visible = false;
+            
+            await new Promise(r => setTimeout(r, 100)); 
+            
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            const solutions = [];
+            
+            const letterMap = { 'rechts': 'A', 'links': 'B', 'unten': 'C', 'oben': 'D', 'hinten': 'E' };
+            const answerMap = { 'rechts': 'r', 'links': 'l', 'oben': 'o', 'unten': 'u', 'hinten': 'h' };
+
+            const density = parseInt(document.getElementById('density-slider').value);
+            const maxThick = parseFloat(document.getElementById('max-thick-slider').value);
+            const maxLength = parseInt(document.getElementById('max-length-slider').value); 
+            const maxAngle = parseInt(document.getElementById('max-angle-slider').value);
+
+            const patternProb = parseInt(document.getElementById('pattern-prob-slider').value);
+            let allowedPatterns = [];
+            if(document.getElementById('pattern-kreis').checked) allowedPatterns.push('kreis');
+            if(document.getElementById('pattern-spirale').checked) allowedPatterns.push('spirale');
+            if(document.getElementById('pattern-uturn').checked) allowedPatterns.push('uturn');
+            if(document.getElementById('pattern-trefoil').checked) allowedPatterns.push('trefoil');
+            
+            const checkedBoxes = document.querySelectorAll('.generator-style-cb:checked');
+            const selectedStyleIds = Array.from(checkedBoxes).map(cb => cb.value);
+
+            const numDreh = parseInt(document.getElementById('view-ratio-slider').value);
+            const numKipp = 24 - numDreh;
+            const drehViewsPool = ['rechts', 'links', 'hinten'];
+            const kippViewsPool = ['oben', 'unten'];
+            let simulationViews = [];
+            
+            for(let k=0; k<numDreh; k++) simulationViews.push(drehViewsPool[Math.floor(Math.random() * drehViewsPool.length)]);
+            for(let k=0; k<numKipp; k++) simulationViews.push(kippViewsPool[Math.floor(Math.random() * kippViewsPool.length)]);
+            
+            for (let k = simulationViews.length - 1; k > 0; k--) {
+                const j = Math.floor(Math.random() * (k + 1));
+                [simulationViews[k], simulationViews[j]] = [simulationViews[j], simulationViews[k]];
+            }
+
+            for (let i = 0; i < 24; i++) {
+                progressText.innerText = `Erstelle Aufgabe ${i + 1} von 24...`;
+                progressFill.style.width = `${((i) / 24) * 100}%`;
+                
+                await new Promise(r => setTimeout(r, 20)); 
+
+                clearCurrentFigure();
+                generateRandomFigure(density, maxThick, maxLength, maxAngle, patternProb, allowedPatterns, selectedStyleIds);
+
+                const targetView = simulationViews[i];
+
+                const imgL = takePDFPhoto('vorne');
+                const imgR = takePDFPhoto(targetView);
+
+                solutions.push({ 
+                    taskNum: i + 1, 
+                    view: targetView, 
+                    letter: letterMap[targetView],
+                    answer: answerMap[targetView]
+                });
+
+                const taskOnPage = i % 3;
+                if (taskOnPage === 0 && i > 0) doc.addPage();
+
+                const yOffset = 15 + taskOnPage * 92;
+
+                doc.setFontSize(14);
+                doc.setFont("helvetica", "bold");
+                doc.text(`Aufgabe ${i + 1}`, 10, yOffset);
+
+                doc.addImage(imgL, 'JPEG', 10, yOffset + 3, 80, 80);
+
+                doc.setFontSize(12);
+                doc.setFont("helvetica", "normal");
+                
+                const options = ["(A) : r", "(B) : l", "(C) : u", "(D) : o", "(E) : h"];
+                options.forEach((opt, idx) => {
+                    doc.text(opt, 105, yOffset + 30 + (idx * 7.5), { align: "center" });
+                });
+
+                doc.addImage(imgR, 'JPEG', 120, yOffset + 3, 80, 80);
+            }
+
+            progressText.innerText = `Erstelle Lösungsbogen...`;
+            progressFill.style.width = `95%`;
+            await new Promise(r => setTimeout(r, 50));
+
+            doc.addPage();
+            doc.setFontSize(20);
+            doc.setFont("helvetica", "bold");
+            doc.text("Lösungsschlüssel", 105, 25, { align: "center" });
+            
+            doc.setFontSize(14);
+            doc.setFont("helvetica", "normal");
+            
+            for(let i = 0; i < 24; i++) {
+                const sol = solutions[i];
+                const col = i < 12 ? 0 : 1;
+                const row = i % 12;
+                const x = 50 + col * 70;
+                const y = 45 + row * 12;
+                doc.text(`Aufgabe ${sol.taskNum}:   ${sol.letter} (${sol.answer})`, x, y);
+            }
+
+            progressText.innerText = `PDF wird gespeichert...`;
+            progressFill.style.width = `100%`;
+            await new Promise(r => setTimeout(r, 100));
+
+            doc.save("TMS_Schlauchfiguren_Testsimulation.pdf");
+
+            // --- AUFRÄUMEN UND WIEDERHERSTELLEN ---
+            isGlobalMonochrome = backupMono;
+            scene.background = backupBg;
+            scene.fog.color = backupFog;
+            currentAmbInt = backupAmbInt;
+            currentDirInt = backupDirInt;
+            frameLeft.visible = backupFrameL;
+            frameRight.visible = backupFrameR;
+            
+            // Glas wieder auf realistische Einstellungen zurücksetzen
+            glassCube.material.transmission = backupGlassTransmission;
+            glassCube.material.opacity = backupGlassOpacity;
+            glassCube.material.envMap = backupGlassEnvMap;
+            
+            loadFiguresFromData(backupData);
+            updateLighting(); 
+            if (backupMode === 'editor') {
+                setMode('editor');
+            }
+
+            document.getElementById('pdf-modal').classList.add('hidden');
+        }
+
+        function toggleCategory(id, headerEl) {
+            const content = document.getElementById(id);
+            const arrow = headerEl.querySelector('.arrow-icon');
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                arrow.style.transform = 'rotate(0deg)';
+            } else {
+                content.classList.add('hidden');
+                arrow.style.transform = 'rotate(-90deg)';
+            }
+        }
+
+        function toggleEditorUI() {
+            isEditorUIHidden = !isEditorUIHidden;
+            const panels = document.getElementById('editor-ui-panels');
+            const btn = document.getElementById('toggle-ui-btn');
+
+            if(isEditorUIHidden) {
+                panels.classList.add('hidden');
+                btn.innerHTML = "🛠️ Einstellungen anzeigen";
+            } else {
+                panels.classList.remove('hidden');
+                btn.innerHTML = "⚙️ Einstellungen verbergen";
+            }
+        }
+        
+        function toggleBottomUI() {
+            isBottomUIHidden = !isBottomUIHidden;
+            const content = document.getElementById('bottom-ui-content');
+            const btn = document.getElementById('toggle-bottom-ui-btn');
+            const wrapper = document.getElementById('bottom-ui-wrapper');
+
+            if(isBottomUIHidden) {
+                content.classList.add('hidden');
+                btn.innerHTML = "⬆️ Menü anzeigen";
+                wrapper.classList.replace('bottom-6', 'bottom-0');
+                btn.classList.replace('rounded-t-lg', 'rounded-t-md');
+                btn.classList.add('border-b-0');
+            } else {
+                content.classList.remove('hidden');
+                btn.innerHTML = "⬇️ Menü verbergen";
+                wrapper.classList.replace('bottom-0', 'bottom-6');
+                btn.classList.replace('rounded-t-md', 'rounded-t-lg');
+                btn.classList.remove('border-b-0');
+            }
+        }
+
+        function toggleTestMovement(isChecked) {
+            if (currentMode === 'selbsttest') {
+                controlsLeft.enabled = isChecked;
+                controlsRight.enabled = isChecked;
+            }
+        }
+
+        function setMode(mode) {
+            currentMode = mode;
+            const leftDiv = document.getElementById('canvas-left');
+            const rightDiv = document.getElementById('canvas-right');
+            
+            const btnEditor = document.getElementById('btn-mode-editor');
+            const btnPractice = document.getElementById('btn-mode-practice');
+            const btnSelbst = document.getElementById('btn-mode-selbsttest');
+            
+            const desc = document.getElementById('mode-desc');
+            const exportBtn = document.getElementById('export-btn');
+            const toggleUIBtn = document.getElementById('toggle-ui-btn');
+            const editorPanels = document.getElementById('editor-ui-panels');
+            const allowMoveLabel = document.getElementById('allow-move-label');
+            const allowMoveCheckbox = document.getElementById('allow-move-toggle');
+            
+            const practiceUI = document.getElementById('practice-ui');
+            const selbsttestUI = document.getElementById('selbsttest-ui');
+            const bottomWrapper = document.getElementById('bottom-ui-wrapper');
+            
+            btnEditor.className = "px-5 py-2 rounded-md bg-blue-600 text-white font-bold transition-colors";
+            btnPractice.className = "px-5 py-2 rounded-md text-gray-400 hover:text-white font-bold transition-colors";
+            btnSelbst.className = "px-5 py-2 rounded-md text-gray-400 hover:text-white font-bold transition-colors";
+            
+            editorPanels.classList.add('hidden');
+            practiceUI.classList.add('hidden');
+            selbsttestUI.classList.add('hidden');
+            bottomWrapper.classList.add('hidden');
+            
+            exportBtn.classList.add('hidden');
+            toggleUIBtn.classList.add('hidden');
+            allowMoveLabel.classList.add('hidden'); 
+            
+            transformControl.detach();
+            if(selectedSphere) selectedSphere.material.color.setHex(0x00ff00);
+            selectedSphere = null;
+
+            frameLeft.visible = false;
+            frameRight.visible = false;
+
+            if (mode === 'editor') {
+                btnEditor.className = "px-5 py-2 rounded-md bg-blue-600 text-white font-bold transition-colors";
+                desc.innerHTML = "<strong>Editor:</strong> Klicke direkt auf den Schlauch, um einen neuen Punkt einzufügen! Ziehe die Punkte.";
+                toggleUIBtn.classList.remove('hidden');
+                
+                if(!isEditorUIHidden) editorPanels.classList.remove('hidden');
+                
+                leftDiv.className = "w-full h-full relative";
+                rightDiv.className = "w-0 h-full hidden relative";
+                
+                controlsLeft.enabled = true;
+                transformControl.enabled = true;
+
+                figures.forEach(f => f.controlSpheres.forEach(s => s.visible = (f.id === activeFigureId))); 
+            
+            } else if (mode === 'practice') {
+                btnPractice.className = "px-5 py-2 rounded-md bg-green-600 text-white font-bold transition-colors";
+                desc.innerHTML = "<strong>Ansichten-Vergleich:</strong> Zwei Ansichten direkt miteinander vergleichen und Seite an Seite experimentieren. Beide Würfel lassen sich frei drehen.";
+                
+                bottomWrapper.classList.remove('hidden');
+                practiceUI.classList.remove('hidden');
+                if (isBottomUIHidden) toggleBottomUI(); 
+                
+                exportBtn.classList.remove('hidden'); 
+                
+                leftDiv.className = "w-1/2 h-full relative";
+                rightDiv.className = "w-1/2 h-full relative border-l-4 border-gray-600 bg-gray-900";
+                
+                controlsLeft.enabled = true;
+                controlsRight.enabled = true;
+                transformControl.enabled = false;
+
+                figures.forEach(f => f.controlSpheres.forEach(s => s.visible = false)); 
+                
+                frameLeft.visible = true;
+                frameRight.visible = true;
+
+                updateViewsFromSelects();
+
+            } else if (mode === 'selbsttest') {
+                btnSelbst.className = "px-5 py-2 rounded-md bg-purple-600 text-white font-bold transition-colors";
+                desc.innerHTML = "<strong>Selbsttest:</strong> Das linke Bild wird als das NEUE 'Vorne' definiert. Wie heißt das rechte Bild relativ dazu?";
+                
+                bottomWrapper.classList.remove('hidden');
+                selbsttestUI.classList.remove('hidden');
+                if (isBottomUIHidden) toggleBottomUI(); 
+                
+                exportBtn.classList.remove('hidden'); 
+                allowMoveLabel.classList.remove('hidden');
+                
+                leftDiv.className = "w-1/2 h-full relative";
+                rightDiv.className = "w-1/2 h-full relative border-l-4 border-gray-600 bg-gray-900";
+                
+                let allowMove = allowMoveCheckbox.checked;
+                controlsLeft.enabled = allowMove; 
+                controlsRight.enabled = allowMove;
+                
+                transformControl.enabled = false;
+
+                figures.forEach(f => f.controlSpheres.forEach(s => s.visible = false)); 
+                
+                frameLeft.visible = true;
+                frameRight.visible = true;
+                
+                randomizeSelfTest('both');
+            }
+
+            onWindowResize(); 
+        }
+
+        function filterStyles() {
+            const input = document.getElementById('style-search').value.toLowerCase();
+            const select = document.getElementById('style-select');
+            const options = select.options;
+            
+            for (let i = 0; i < options.length; i++) {
+                const text = options[i].text.toLowerCase();
+                if (text.includes(input)) {
+                    options[i].style.display = '';
+                } else {
+                    options[i].style.display = 'none';
+                }
+            }
+        }
+
+        function generateProceduralTexture(type, isMono = false) {
+            const cacheKey = type + (isMono ? '_mono' : '');
+            if (textureCache[cacheKey]) return textureCache[cacheKey];
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+
+            if (type === 'barber') {
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 512, 512);
+                ctx.fillStyle = '#222222';
+                ctx.beginPath();
+                ctx.moveTo(0, 0); ctx.lineTo(256, 0); ctx.lineTo(512, 256); 
+                ctx.lineTo(512, 512); ctx.lineTo(256, 512); ctx.lineTo(0, 256);
+                ctx.fill();
+            } else if (type === 'dotted') {
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 512, 512);
+                ctx.fillStyle = '#222222';
+                ctx.beginPath(); ctx.arc(256, 256, 140, 0, Math.PI * 2); ctx.fill();
+            } else if (type === 'striped') {
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 512, 512);
+                ctx.fillStyle = '#222222';
+                ctx.fillRect(0, 200, 512, 112);
+            } else if (type === 'hazard') {
+                ctx.fillStyle = '#ffffff'; 
+                ctx.fillRect(0, 0, 512, 512);
+                ctx.fillStyle = '#222222';
+                for(let i=-512; i<1024; i+=64) {
+                    ctx.beginPath(); 
+                    ctx.moveTo(i, 0); ctx.lineTo(i+512, 512); 
+                    ctx.lineTo(i+512+32, 512); ctx.lineTo(i+32, 0); 
+                    ctx.fill();
+                }
+            } else if (type === 'measure') {
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 512, 512);
+                ctx.fillStyle = '#222222';
+                ctx.fillRect(0, 0, 512, 30);
+                ctx.fillRect(0, 482, 512, 30);
+                ctx.font = 'bold 80px monospace';
+                ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                for(let i=0; i<=512; i+=64) {
+                    ctx.fillRect(i-4, 30, 8, i%128===0 ? 40 : 20);
+                    ctx.fillRect(i-4, 482 - (i%128===0 ? 40 : 20), 8, i%128===0 ? 40 : 20);
+                }
+                ctx.fillText("T-M-S", 256, 256);
+            } else if (type === 'corrugated') {
+                const grad = ctx.createLinearGradient(0, 0, 32, 0);
+                grad.addColorStop(0, '#444444'); grad.addColorStop(0.5, '#ffffff'); grad.addColorStop(1, '#444444');
+                ctx.fillStyle = grad;
+                for(let i=0; i<512; i+=32) { ctx.fillRect(i, 0, 32, 512); }
+            } else if (type === 'braided') {
+                ctx.fillStyle = '#444444'; ctx.fillRect(0, 0, 512, 512);
+                ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 12;
+                for(let i=-512; i<1024; i+=32) {
+                    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i+512, 512); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(i, 512); ctx.lineTo(i+512, 0); ctx.stroke();
+                }
+            } else if (type === 'rusty') {
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 512, 512);
+                for(let i=0; i<10000; i++) { 
+                    ctx.fillStyle = `rgba(0,0,0,${Math.random()*0.3})`;
+                    ctx.beginPath(); ctx.arc(Math.random()*512, Math.random()*512, Math.random()*15, 0, Math.PI*2); ctx.fill();
+                }
+            } else if (type === 'wool_pattern') {
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 512, 512);
+                ctx.strokeStyle = '#cccccc'; ctx.lineWidth = 12;
+                for(let i=-512; i<1024; i+=32) {
+                    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i+512, 512); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(i, 512); ctx.lineTo(i+512, 0); ctx.stroke();
+                }
+            } else if (type === 'rope_pattern') {
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 512, 512);
+                ctx.strokeStyle = '#aaaaaa'; ctx.lineWidth = 24;
+                for(let i=-512; i<1024; i+=64) {
+                    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i+512, 512); ctx.stroke();
+                }
+                ctx.fillStyle = 'rgba(0,0,0,0.1)';
+                for(let i=0; i<10000; i++) {
+                    ctx.fillRect(Math.random()*512, Math.random()*512, 2, 2);
+                }
+            } else if (type === 'fuzz_alpha') {
+                ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, 512, 512); 
+                ctx.strokeStyle = '#ffffff'; 
+                ctx.lineWidth = 2;
+                ctx.lineCap = 'round';
+                for(let i=0; i<8000; i++) {
+                    ctx.beginPath();
+                    let startX = Math.random() * 512;
+                    let startY = Math.random() * 512;
+                    ctx.moveTo(startX, startY);
+                    ctx.quadraticCurveTo(
+                        startX + (Math.random()-0.5)*30, 
+                        startY + (Math.random()-0.5)*30, 
+                        startX + (Math.random()-0.5)*50, 
+                        startY + (Math.random()-0.5)*50
+                    );
+                    ctx.stroke();
+                }
+            } else if (type === 'scifi') {
+                ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, 512, 512); 
+                ctx.strokeStyle = '#ffffff'; 
+                ctx.lineWidth = 16;
+                for(let i=0; i<=512; i+=64) {
+                    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke();
+                }
+            } else if (type === 'candy') {
+                ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 512, 512);
+                ctx.fillStyle = '#dd1111';
+                for(let i=-512; i<1024; i+=128) {
+                    ctx.beginPath(); 
+                    ctx.moveTo(i, 0); ctx.lineTo(i+512, 512); 
+                    ctx.lineTo(i+512+64, 512); ctx.lineTo(i+64, 0); 
+                    ctx.fill();
+                }
+            } else if (type === 'bamboo') {
+                ctx.fillStyle = '#c1a55b'; 
+                ctx.fillRect(0, 0, 512, 512);
+                ctx.fillStyle = '#a68c47';
+                for(let i=0; i<100; i++) {
+                    ctx.fillRect(0, Math.random()*512, 512, Math.random()*3);
+                }
+                ctx.fillStyle = '#7a662f';
+                ctx.fillRect(0, 240, 512, 32); 
+                ctx.fillStyle = '#4a3d1c';
+                ctx.fillRect(0, 252, 512, 8); 
+            } else if (type === 'bamboo_bump') {
+                ctx.fillStyle = '#888888';
+                ctx.fillRect(0, 0, 512, 512);
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 240, 512, 32);
+            } else if (type === 'magma') {
+                ctx.fillStyle = '#111111'; ctx.fillRect(0, 0, 512, 512);
+                for(let i=0; i<5000; i++) {
+                    const hue = Math.random() < 0.5 ? '#ff2200' : (Math.random() < 0.5 ? '#ff6600' : '#ffaa00');
+                    ctx.fillStyle = hue;
+                    ctx.globalAlpha = Math.random() * 0.8;
+                    ctx.beginPath(); 
+                    ctx.arc(Math.random()*512, Math.random()*512, Math.random()*10, 0, Math.PI*2); 
+                    ctx.fill();
+                }
+                ctx.globalAlpha = 1.0;
+            }
+
+            if (isMono) {
+                const imgData = ctx.getImageData(0, 0, 512, 512);
+                const data = imgData.data;
+                for (let i = 0; i < data.length; i += 4) {
+                    const luma = data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
+                    data[i] = luma;     
+                    data[i+1] = luma;   
+                    data[i+2] = luma;   
+                }
+                ctx.putImageData(imgData, 0, 0);
+            }
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            
+            textureCache[cacheKey] = tex;
+            return tex;
+        }
+
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerElapsed = 0;
+            document.getElementById('timer-display').textContent = "0.0s";
+            
+            document.getElementById('start-timer-btn').classList.add('hidden');
+            
+            timerInterval = setInterval(() => {
+                timerElapsed += 0.1;
+                document.getElementById('timer-display').textContent = timerElapsed.toFixed(1) + "s";
+            }, 100);
+        }
+
+        function stopTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            timerInterval = null;
+        }
+
+        function randomizeSelfTest(type) {
+            stopTimer();
+            timerElapsed = 0;
+            document.getElementById('timer-display').textContent = "0.0s";
+            document.getElementById('start-timer-btn').classList.remove('hidden');
+
+            taskAnsweredCorrectly = false; 
+
+            if (type === 'both') {
+                currentLeftBaseView = allBaseViews[Math.floor(Math.random() * allBaseViews.length)];
+            }
+            
+            const possibleAnswers = ['r', 'l', 'o', 'u', 'h'];
+            let newAnswer;
+            do {
+                newAnswer = possibleAnswers[Math.floor(Math.random() * possibleAnswers.length)];
+            } while (newAnswer === currentTestRelativeAnswer);
+
+            currentTestRelativeAnswer = newAnswer;
+            
+            document.getElementById('test-left-label').textContent = `Ursprung: ${viewNames[currentLeftBaseView]}`;
+            
+            document.getElementById('test-feedback').textContent = "NEUE RUNDE! RATEN...";
+            document.getElementById('test-feedback').className = "text-xl font-bold text-white uppercase tracking-wider block h-8";
+
+            applyFixedView(cameraLeft, controlsLeft, currentLeftBaseView);
+            
+            let startPos = cameraLeft.position.clone();
+            let startUp = cameraLeft.up.clone();
+            
+            let lookDir = new THREE.Vector3(0,0,0).sub(startPos).normalize();
+            let rightDir = new THREE.Vector3().crossVectors(lookDir, startUp).normalize();
+            let upDir = startUp.normalize();
+            
+            let axis = new THREE.Vector3();
+            let angle = 0;
+            
+            switch (currentTestRelativeAnswer) {
+                case 'r': axis.copy(upDir); angle = Math.PI / 2; break;    
+                case 'l': axis.copy(upDir); angle = -Math.PI / 2; break;   
+                case 'o': axis.copy(rightDir); angle = -Math.PI / 2; break; 
+                case 'u': axis.copy(rightDir); angle = Math.PI / 2; break;  
+                case 'h': axis.copy(upDir); angle = Math.PI; break;        
+            }
+            
+            startPos.applyAxisAngle(axis, angle);
+            startUp.applyAxisAngle(axis, angle);
+            
+            cameraRight.position.copy(startPos);
+            cameraRight.up.copy(startUp);
+            cameraRight.lookAt(0,0,0);
+            
+            controlsRight.target.set(0,0,0);
+            controlsRight.update();
+        }
+
+        function checkGuess(guess) {
+            const feedbackEl = document.getElementById('test-feedback');
+            
+            if (guess === currentTestRelativeAnswer) {
+                feedbackEl.textContent = "✔ RICHTIG!";
+                feedbackEl.className = "text-2xl font-black text-green-400 uppercase tracking-wider block h-8 animate-pulse";
+                
+                if (!taskAnsweredCorrectly) {
+                    currentStreak++;
+                    document.getElementById('streak-counter').textContent = currentStreak;
+                    taskAnsweredCorrectly = true;
+                    stopTimer(); 
+                }
+            } else {
+                feedbackEl.textContent = `✘ FALSCH! (Es war: ${relViewNames[currentTestRelativeAnswer]})`;
+                feedbackEl.className = "text-xl font-black text-red-500 uppercase tracking-wider block h-8";
+                
+                currentStreak = 0;
+                document.getElementById('streak-counter').textContent = currentStreak;
+            }
+        }
+
+        function updateViewsFromSelects() {
+            currentLeftBaseView = document.getElementById('left-view-select').value;
+            currentRightBaseView = document.getElementById('right-view-select').value;
+
+            applyFixedView(cameraLeft, controlsLeft, currentLeftBaseView);
+            applyFixedView(cameraRight, controlsRight, currentRightBaseView);
+        }
+
+        function createOrientationSprites() {
+            orientationSprites = new THREE.Group();
+            const labels = [
+                { t: 'Vorne', p: [0, 0, 3.1] }, { t: 'Hinten', p: [0, 0, -3.1] },
+                { t: 'Rechts', p: [3.1, 0, 0] }, { t: 'Links', p: [-3.1, 0, 0] },
+                { t: 'Oben', p: [0, 3.1, 0] }, { t: 'Unten', p: [0, -3.1, 0] }
+            ];
+
+            labels.forEach(l => {
+                const canvas = document.createElement('canvas');
+                canvas.width = 256; canvas.height = 128;
+                const ctx = canvas.getContext('2d');
+
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, 20, 256, 88); 
+                
+                ctx.font = 'bold 50px sans-serif';
+                ctx.fillStyle = 'white';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(l.t, 128, 64);
+                
+                const texture = new THREE.CanvasTexture(canvas);
+                const spriteMat = new THREE.SpriteMaterial({ map: texture, depthTest: false }); 
+                const sprite = new THREE.Sprite(spriteMat);
+                sprite.position.set(...l.p);
+                sprite.scale.set(2, 1, 1);
+                orientationSprites.add(sprite);
+            });
+
+            scene.add(orientationSprites);
+            orientationSprites.visible = false;
+        }
+
+        function toggleOrientation(visible) { orientationSprites.visible = visible; }
+
+        function updateContrastUI(val) {
+            let text = val + "%";
+            if (val == 0) text = "0% (Flach & Matt)";
+            else if (val == 50) text = "50% (Normal)";
+            else if (val == 100) text = "100% (Hart & Glänzend)";
+            document.getElementById('contrast-val').textContent = text;
+            updateLighting(); 
+        }
+
+        function updateContrast() {
+            updateLighting();
+            updateAllFigures(); 
+        }
+
+        function updateLightingUI(val) {
+            let text = "Normal";
+            if (val > 0) text = `Überbelichtet (+${val})`;
+            if (val < 0) text = `Unterbelichtet (${val})`;
+            document.getElementById('exposure-val').textContent = text;
+        }
+
+        function updateLighting() {
+            const expVal = parseFloat(document.getElementById('exposure-slider').value);
+            const contSlider = document.getElementById('contrast-slider');
+            const contVal = contSlider ? parseFloat(contSlider.value) / 100 : 0.5;
+            
+            let bgColor = new THREE.Color('#1a202c');
+            let fogColor = new THREE.Color('#1a202c');
+            let fogDensity = 0;
+
+            let baseAmb = THREE.MathUtils.lerp(1.2, 0.2, contVal); 
+            let baseDir = THREE.MathUtils.lerp(0.2, 1.8, contVal); 
+
+            if (expVal > 0) {
+                const factor = expVal / 100;
+                bgColor.lerp(new THREE.Color('#ffffff'), factor);
+                fogColor.lerp(new THREE.Color('#ffffff'), factor);
+                fogDensity = factor * 0.15; 
+                currentAmbInt = baseAmb + (factor * 1.5);
+                currentDirInt = baseDir + (factor * 1.0);
+            } else if (expVal < 0) {
+                const factor = Math.abs(expVal) / 100;
+                bgColor.lerp(new THREE.Color('#000000'), factor);
+                fogColor.lerp(new THREE.Color('#000000'), factor);
+                fogDensity = factor * 0.20; 
+                currentAmbInt = baseAmb - (factor * baseAmb * 0.8);
+                currentDirInt = baseDir - (factor * baseDir * 0.8);
+            } else {
+                currentAmbInt = baseAmb;
+                currentDirInt = baseDir;
+            }
+
+            scene.background = bgColor;
+            scene.fog.color.copy(fogColor);
+            scene.fog.density = fogDensity;
+            
+            needsEnvMapUpdate = true;
+        }
+
+        function updateFlatteningUI(val) { 
+            document.getElementById('flat-val').textContent = val + '%'; 
+            updateFlattening();
+            updateBlur(); 
+        }
+        
+        function updateFlattening() {
+            flatteningAmount = parseFloat(document.getElementById('flat-slider').value) / 100;
+            needsEnvMapUpdate = true;
+        }
+
+        function updateResolutionUI(val) {
+            let text = "Standard";
+            if(val <= 20) text = "Niedrig (Eckig)";
+            if(val == 30) text = "Standard";
+            if(val == 40) text = "Hoch";
+            if(val >= 50) text = "Ultra-Smooth";
+            document.getElementById('resolution-val').textContent = text;
+        }
+
+        function updateBlurUI(val) { 
+            document.getElementById('blur-val').textContent = val == 0 ? "Aus" : `${val}%`; 
+            updateBlur(); 
+        }
+        
+        function updateBlur() {
+            if (!usePostProcessing) return;
+            const blurAmount = parseFloat(document.getElementById('blur-slider').value) / 100;
+            
+            const blurMultiplier = 1.0 + (flatteningAmount * 4.0); 
+            const aperture = blurAmount * 0.04 * blurMultiplier; 
+            const maxblur = blurAmount * 0.08 * blurMultiplier; 
+            
+            bokehPassLeft.uniforms["aperture"].value = aperture; 
+            bokehPassLeft.uniforms["maxblur"].value = maxblur;
+            bokehPassRight.uniforms["aperture"].value = aperture;
+            bokehPassRight.uniforms["maxblur"].value = maxblur;
+        }
+
+        function setupEditorTools() {
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            transformControl = new THREE.TransformControls(cameraLeft, rendererLeft.domElement);
+            
+            transformControl.addEventListener('change', () => {
+                const activeFig = getActiveFigure();
+                if (selectedSphere && activeFig) {
+                    const maxBound = 3.0 - (activeFig.thickness || 0.2);
+                    selectedSphere.position.x = THREE.MathUtils.clamp(selectedSphere.position.x, -maxBound, maxBound);
+                    selectedSphere.position.y = THREE.MathUtils.clamp(selectedSphere.position.y, -maxBound, maxBound);
+                    selectedSphere.position.z = THREE.MathUtils.clamp(selectedSphere.position.z, -maxBound, maxBound);
+                }
+                updateAllFigures();
+            });
+            
+            transformControl.addEventListener('dragging-changed', function (event) {
+                controlsLeft.enabled = !event.value;
+            });
+            scene.add(transformControl);
+        }
+
+        function toggleMonochrome(isChecked) { isGlobalMonochrome = isChecked; updateAllFigures(); }
+        function toggleGrayMode(isChecked) { isGlobalGrayMode = isChecked; updateAllFigures(); }
+
+        function getActiveFigure() { return figures.find(f => f.id === activeFigureId); }
+
+        function addNewFigure() {
+            const id = nextFigureId++;
+            const newFigure = {
+                id: id, name: `Figur ${id + 1}`, controlSpheres: [], meshGroup: new THREE.Group(),
+                style: 'standard', color: colorPalette[id % colorPalette.length], thickness: 0.2, grayLevel: 0.5,
+                curve: null 
+            };
+
+            scene.add(newFigure.meshGroup);
+            figures.push(newFigure);
+            
+            const offset = (id * 0.5) - 1; 
+            addPointToFigure(newFigure, new THREE.Vector3(-1.5, offset, offset));
+            addPointToFigure(newFigure, new THREE.Vector3(1.5, offset, offset));
+            
+            updateUI();
+            switchFigure(id);
+        }
+
+        function finishEditing() {
+            activeFigureId = -1;
+            transformControl.detach();
+            if (selectedSphere) {
+                selectedSphere.material.color.setHex(0x00ff00);
+                selectedSphere = null;
+            }
+            
+            figures.forEach(fig => {
+                fig.controlSpheres.forEach(sphere => sphere.visible = false);
+            });
+            
+            updateUIValues();
+            updateAllFigures();
+        }
+
+        function deleteActiveFigure() {
+            const active = getActiveFigure();
+            if (!active) return;
+
+            active.controlSpheres.forEach(s => scene.remove(s));
+            clearGroup(active.meshGroup);
+            scene.remove(active.meshGroup);
+
+            figures = figures.filter(f => f.id !== activeFigureId);
+            
+            transformControl.detach();
+            selectedSphere = null;
+            
+            updateUI();
+            
+            if (figures.length > 0) switchFigure(figures[0].id);
+            else finishEditing();
+        }
+
+        function switchFigure(id) {
+            activeFigureId = id;
+            transformControl.detach();
+            if (selectedSphere) { selectedSphere.material.color.setHex(0x00ff00); selectedSphere = null; }
+
+            figures.forEach(fig => {
+                const isActive = (fig.id === activeFigureId);
+                fig.controlSpheres.forEach(sphere => sphere.visible = isActive && currentMode === 'editor');
+            });
+
+            updateUIValues();
+            updateAllFigures();
+        }
+
+        function changeStyle(newStyle) {
+            const active = getActiveFigure();
+            if(active) {
+                active.style = newStyle;
+
+                const styleDef = globalStylePool.find(s => s.id === newStyle);
+                if (styleDef) active.thickness = styleDef.baseThickness;
+                
+                updateUIValues(); updateAllFigures();
+            }
+        }
+
+        function updateThickness(val) {
+            const active = getActiveFigure();
+            if (active) {
+                active.thickness = parseFloat(val);
+                document.getElementById('thickness-val').textContent = active.thickness.toFixed(2);
+
+                const maxBound = 3.0 - active.thickness;
+                active.controlSpheres.forEach(sphere => {
+                    sphere.position.x = THREE.MathUtils.clamp(sphere.position.x, -maxBound, maxBound);
+                    sphere.position.y = THREE.MathUtils.clamp(sphere.position.y, -maxBound, maxBound);
+                    sphere.position.z = THREE.MathUtils.clamp(sphere.position.z, -maxBound, maxBound);
+                });
+
+                updateAllFigures();
+            }
+        }
+
+        function updateGray(val) {
+            const active = getActiveFigure();
+            if (active) {
+                active.grayLevel = parseFloat(val);
+                document.getElementById('gray-val').textContent = Math.round(active.grayLevel * 100) + '%';
+                updateAllFigures();
+            }
+        }
+
+        function updateUI() {
+            const select = document.getElementById('figure-select');
+            select.innerHTML = '<option value="-1">- Keine ausgewählt -</option>'; 
+            figures.forEach(fig => {
+                const opt = document.createElement('option');
+                opt.value = fig.id; opt.textContent = fig.name; select.appendChild(opt);
+            });
+            updateUIValues();
+        }
+
+        function updateUIValues() {
+            const active = getActiveFigure();
+            const panel = document.getElementById('properties-panel');
+            
+            document.getElementById('figure-select').value = activeFigureId;
+            
+            if (active) {
+                panel.style.opacity = '1';
+                panel.style.pointerEvents = 'auto';
+
+                document.getElementById('style-select').value = active.style;
+                document.getElementById('thickness-slider').value = active.thickness;
+                document.getElementById('thickness-val').textContent = active.thickness.toFixed(2);
+                document.getElementById('gray-slider').value = active.grayLevel;
+                document.getElementById('gray-val').textContent = Math.round(active.grayLevel * 100) + '%';
+                
+                const warningDiv = document.getElementById('premium-warning');
+                if (warningDiv) {
+                    if (active.style.startsWith('premium_')) warningDiv.classList.remove('hidden');
+                    else warningDiv.classList.add('hidden');
+                }
+
+            } else {
+                panel.style.opacity = '0.3';
+                panel.style.pointerEvents = 'none';
+                
+                const warningDiv = document.getElementById('premium-warning');
+                if (warningDiv) warningDiv.classList.add('hidden');
+            }
+        }
+
+        function createPointSphere(position) {
+            const geometry = new THREE.SphereGeometry(0.15, 16, 16);
+            const material = new THREE.MeshStandardMaterial({ color: 0x00ff00 }); 
+            const sphere = new THREE.Mesh(geometry, material);
+            sphere.position.copy(position);
+            scene.add(sphere);
+            return sphere;
+        }
+
+        function addPointToFigure(figure, position) {
+            const sphere = createPointSphere(position);
+            figure.controlSpheres.push(sphere);
+        }
+
+        function addPoint() {
+            const active = getActiveFigure();
+            if (!active) return;
+            
+            const maxBound = 3.0 - active.thickness;
+            const newPos = new THREE.Vector3(
+                THREE.MathUtils.clamp((Math.random() - 0.5) * 3, -maxBound, maxBound),
+                THREE.MathUtils.clamp((Math.random() - 0.5) * 3, -maxBound, maxBound),
+                THREE.MathUtils.clamp((Math.random() - 0.5) * 3, -maxBound, maxBound)
+            );
+
+            addPointToFigure(active, newPos);
+            selectSphere(active.controlSpheres[active.controlSpheres.length - 1]);
+            updateAllFigures();
+        }
+
+        function removeSelectedPoint() {
+            const active = getActiveFigure();
+            if (!active || !selectedSphere) return;
+
+            if (active.controlSpheres.length > 2) {
+                transformControl.detach();
+                scene.remove(selectedSphere);
+                active.controlSpheres = active.controlSpheres.filter(s => s !== selectedSphere);
+                selectedSphere = null;
+                updateAllFigures();
+            }
+        }
+
+        function clearGroup(group) {
+            while(group.children.length > 0){ 
+                const child = group.children[0];
+                group.remove(child); 
+                if(child.geometry) child.geometry.dispose();
+                if(child.material) child.material.dispose();
+            }
+        }
+
+        function updateAllFigures() {
+            const resSlider = document.getElementById('resolution-slider');
+            const resValue = resSlider ? parseInt(resSlider.value) : 30;
+            const resMultiplier = resValue / 10;
+
+            figures.forEach(figure => {
+                clearGroup(figure.meshGroup);
+
+                if (figure.controlSpheres.length < 2) return;
+
+                const points = figure.controlSpheres.map(s => s.position.clone());
+                
+                const isAngular = figure.style === 'angular';
+                const curve = new THREE.CatmullRomCurve3(points, false, isAngular ? 'catmullrom' : 'centripetal', isAngular ? 0 : 0.5);
+                figure.curve = curve; 
+
+                const dynamicSegments = Math.max(64, Math.floor(curve.getLength() * resMultiplier * 3.0));
+
+                const isActive = (figure.id === activeFigureId);
+                let renderColor = figure.color;
+                
+                const isMonoTube = isGlobalMonochrome || (!isActive && isGlobalGrayMode);
+                
+                if (isMonoTube) {
+                    const v = Math.floor(figure.grayLevel * 255);
+                    renderColor = (v << 16) | (v << 8) | v;
+                }
+
+                const contSlider = document.getElementById('contrast-slider');
+                const contVal = contSlider ? parseFloat(contSlider.value) / 100 : 0.5;
+                
+                const glossMod = (contVal - 0.5) * 0.5;   
+                const metalMod = (contVal - 0.5) * 0.4;
+                
+                const maxWall = 3.0;
+
+                let finalCurve = curve;
+                let finalThickness = figure.thickness;
+
+                if (figure.style === 'coiled') {
+                    const coils = curve.getLength() * 2.5; 
+                    const coilRadius = figure.thickness * 1.2; 
+                    finalThickness = figure.thickness * 0.4; 
+
+                    const pointsCount = Math.floor(curve.getLength() * resMultiplier * 10);
+                    const baseSpaced = curve.getSpacedPoints(pointsCount);
+                    const frames = curve.computeFrenetFrames(pointsCount, false);
+                    const coiledPts = [];
+
+                    for(let i=0; i<=pointsCount; i++) {
+                        const t = i / pointsCount;
+                        const angle = t * Math.PI * 2 * coils;
+                        const N = frames.normals[i];
+                        const B = frames.binormals[i];
+                        const pt = baseSpaced[i].clone();
+                        
+                        pt.add(N.clone().multiplyScalar(Math.cos(angle) * coilRadius));
+                        pt.add(B.clone().multiplyScalar(Math.sin(angle) * coilRadius));
+                        
+                        pt.x = THREE.MathUtils.clamp(pt.x, -maxWall, maxWall);
+                        pt.y = THREE.MathUtils.clamp(pt.y, -maxWall, maxWall);
+                        pt.z = THREE.MathUtils.clamp(pt.z, -maxWall, maxWall);
+                        
+                        coiledPts.push(pt);
+                    }
+                    finalCurve = new THREE.CatmullRomCurve3(coiledPts, false, 'centripetal', 0.5);
+                }
+
+                const basicMatOptions = { 
+                    color: renderColor, 
+                    side: THREE.DoubleSide, 
+                    roughness: THREE.MathUtils.clamp(0.4 - glossMod, 0.05, 1.0), 
+                    metalness: THREE.MathUtils.clamp(0.1 + metalMod, 0.0, 1.0)   
+                };
+
+                if (figure.style === 'rubber') {
+                    basicMatOptions.roughness = THREE.MathUtils.clamp(0.9 - (glossMod * 0.4), 0.5, 1.0); 
+                    basicMatOptions.metalness = 0.0;
+                } else if (figure.style === 'glass') {
+                    basicMatOptions.transparent = true;
+                    basicMatOptions.opacity = 0.35;
+                    basicMatOptions.roughness = THREE.MathUtils.clamp(0.1 - glossMod, 0.01, 0.5); 
+                    basicMatOptions.metalness = THREE.MathUtils.clamp(0.1 + metalMod, 0.0, 0.5);
+                } else if (figure.style === 'neon') {
+                    basicMatOptions.emissive = new THREE.Color(renderColor);
+                    basicMatOptions.emissiveIntensity = 0.6;
+                    basicMatOptions.color = new THREE.Color(0xffffff); 
+                } else if (['barber', 'dotted', 'striped', 'hazard', 'measure'].includes(figure.style)) {
+                    const tex = generateProceduralTexture(figure.style, isMonoTube).clone();
+                    tex.needsUpdate = true;
+                    const lengthRepeat = Math.max(1, Math.floor(finalCurve.getLength() * 1.5));
+                    
+                    if (figure.style === 'barber') tex.repeat.set(lengthRepeat, 2); 
+                    else if (figure.style === 'striped') tex.repeat.set(lengthRepeat, 1);
+                    else if (figure.style === 'dotted') tex.repeat.set(lengthRepeat, 2);
+                    else if (figure.style === 'hazard') tex.repeat.set(lengthRepeat, 2);
+                    else if (figure.style === 'measure') tex.repeat.set(Math.max(1, Math.floor(finalCurve.getLength() / 2)), 1);
+                    
+                    basicMatOptions.map = tex;
+                    basicMatOptions.roughness = THREE.MathUtils.clamp(0.6 - glossMod, 0.1, 1.0); 
+                    if(figure.style === 'hazard') basicMatOptions.roughness = THREE.MathUtils.clamp(0.4 - glossMod, 0.1, 0.8);
+                    
+                    basicMatOptions.color = new THREE.Color(renderColor); 
+                    
+                } else if (['corrugated', 'braided', 'rusty'].includes(figure.style)) {
+                    const tex = generateProceduralTexture(figure.style, isMonoTube).clone();
+                    tex.needsUpdate = true;
+                    const lengthRepeat = Math.max(1, Math.floor(finalCurve.getLength() * 2.0));
+                    
+                    if (figure.style === 'corrugated') {
+                        tex.repeat.set(lengthRepeat * 4, 1); 
+                        basicMatOptions.bumpMap = tex;
+                        basicMatOptions.bumpScale = 0.05;
+                        basicMatOptions.roughness = THREE.MathUtils.clamp(0.5 - glossMod, 0.1, 0.8);
+                        basicMatOptions.metalness = THREE.MathUtils.clamp(0.2 + metalMod, 0.0, 0.6);
+                    } else if (figure.style === 'braided') {
+                        tex.repeat.set(lengthRepeat * 2, 4); 
+                        basicMatOptions.bumpMap = tex;
+                        basicMatOptions.bumpScale = 0.04;
+                        basicMatOptions.roughnessMap = tex; 
+                        basicMatOptions.roughness = 0.9; 
+                    } else if (figure.style === 'rusty') {
+                        tex.repeat.set(lengthRepeat, 2);
+                        basicMatOptions.roughnessMap = tex; 
+                        basicMatOptions.roughness = 1.0; 
+                        basicMatOptions.metalness = THREE.MathUtils.clamp(0.6 + metalMod, 0.3, 1.0);
+                        basicMatOptions.color = new THREE.Color(renderColor).multiplyScalar(0.7); 
+                    }
+                } else if (figure.style === 'candy') {
+                    const tex = generateProceduralTexture('candy', isMonoTube).clone();
+                    tex.needsUpdate = true;
+                    tex.repeat.set(Math.max(1, Math.floor(finalCurve.getLength() * 1.0)), 2);
+                    
+                    basicMatOptions.map = tex;
+                    basicMatOptions.roughness = THREE.MathUtils.clamp(0.2 - glossMod, 0.05, 0.6); 
+                    basicMatOptions.color = new THREE.Color(0xffffff); 
+                } else if (figure.style === 'bamboo') {
+                    const tex = generateProceduralTexture('bamboo', isMonoTube).clone();
+                    const bump = generateProceduralTexture('bamboo_bump', isMonoTube).clone();
+                    tex.needsUpdate = true; bump.needsUpdate = true;
+                    const repeat = Math.max(1, Math.floor(finalCurve.getLength() * 0.4));
+                    tex.repeat.set(repeat, 1); 
+                    bump.repeat.set(repeat, 1);
+                    
+                    basicMatOptions.map = tex;
+                    basicMatOptions.bumpMap = bump;
+                    basicMatOptions.bumpScale = 0.15;
+                    basicMatOptions.roughness = THREE.MathUtils.clamp(0.6 - glossMod, 0.2, 1.0);
+                    basicMatOptions.color = new THREE.Color(0xffffff); 
+                } else if (figure.style === 'magma') {
+                    const tex = generateProceduralTexture('magma', isMonoTube).clone();
+                    tex.needsUpdate = true;
+                    tex.repeat.set(Math.max(1, Math.floor(finalCurve.getLength() * 1.5)), 2);
+                    
+                    basicMatOptions.map = tex;
+                    basicMatOptions.emissiveMap = tex;
+                    basicMatOptions.emissive = new THREE.Color(0xffffff); 
+                    basicMatOptions.emissiveIntensity = 1.5;
+                    basicMatOptions.roughness = 0.9;
+                    basicMatOptions.color = new THREE.Color(0xffffff); 
+                } else if (figure.style === 'scifi') {
+                    const tex = generateProceduralTexture('scifi', isMonoTube).clone();
+                    tex.needsUpdate = true;
+                    tex.repeat.set(Math.max(1, Math.floor(finalCurve.getLength() * 2.0)), 4);
+                    
+                    basicMatOptions.map = tex;
+                    basicMatOptions.alphaMap = tex;
+                    basicMatOptions.transparent = true;
+                    basicMatOptions.opacity = 0.9;
+                    basicMatOptions.emissiveMap = tex;
+                    basicMatOptions.emissive = new THREE.Color(renderColor);
+                    basicMatOptions.emissiveIntensity = 2.0;
+                    basicMatOptions.color = new THREE.Color(0x000000); 
+                    basicMatOptions.depthWrite = false;
+                } else if (figure.style.startsWith('premium_')) {
+                    basicMatOptions.color = new THREE.Color(renderColor);
+                    const lengthRepeat = Math.max(1, Math.floor(finalCurve.getLength() * 2.0));
+                    
+                    if (figure.style === 'premium_carbon') {
+                        const normalMap = getExternalTexture('https://threejs.org/examples/textures/carbon/Carbon_Normal.png').clone();
+                        normalMap.needsUpdate = true;
+                        normalMap.repeat.set(lengthRepeat * 4, 4);
+                        basicMatOptions.normalMap = normalMap;
+                        basicMatOptions.roughness = THREE.MathUtils.clamp(0.4 - glossMod, 0.1, 1.0); 
+                        basicMatOptions.metalness = THREE.MathUtils.clamp(0.5 + metalMod, 0.1, 1.0); 
+                        basicMatOptions.clearcoat = THREE.MathUtils.clamp(0.2 + (metalMod * 0.5), 0.0, 1.0);
+                    } else if (figure.style === 'premium_rough') {
+                        const bumpMap = getExternalTexture('https://threejs.org/examples/textures/golfball.jpg').clone();
+                        bumpMap.needsUpdate = true;
+                        bumpMap.repeat.set(lengthRepeat * 3, 2);
+                        basicMatOptions.bumpMap = bumpMap;
+                        basicMatOptions.bumpScale = 0.05;
+                        basicMatOptions.roughness = THREE.MathUtils.clamp(0.8 - glossMod, 0.4, 1.0);
+                        basicMatOptions.metalness = 0.1;
+                    }
+                }
+
+                if (figure.style === 'chain') {
+                    const numBeads = Math.max(10, Math.floor(finalCurve.getLength() * (1 / finalThickness)));
+                    const curvePoints = finalCurve.getSpacedPoints(numBeads);
+                    const beadGeom = new THREE.SphereGeometry(finalThickness, 16, 16);
+                    const beadMat = new THREE.MeshStandardMaterial(basicMatOptions);
+
+                    curvePoints.forEach(p => {
+                        const bead = new THREE.Mesh(beadGeom, beadMat);
+                        p.x = THREE.MathUtils.clamp(p.x, -maxWall + finalThickness, maxWall - finalThickness);
+                        p.y = THREE.MathUtils.clamp(p.y, -maxWall + finalThickness, maxWall - finalThickness);
+                        p.z = THREE.MathUtils.clamp(p.z, -maxWall + finalThickness, maxWall - finalThickness);
+                        bead.position.copy(p);
+                        bead.castShadow = true;
+                        bead.receiveShadow = true;
+                        figure.meshGroup.add(bead);
+                    });
+
+                } else if (figure.style === 'chainlink') {
+                    const numLinks = Math.max(10, Math.floor(finalCurve.getLength() * (2.5 / finalThickness)));
+                    const ringRadius = finalThickness;
+                    const tubeRadius = ringRadius * 0.3; 
+                    const ringGeom = new THREE.TorusGeometry(ringRadius, tubeRadius, 12, 24);
+                    
+                    basicMatOptions.metalness = THREE.MathUtils.clamp(0.8 + metalMod, 0.4, 1.0);
+                    basicMatOptions.roughness = THREE.MathUtils.clamp(0.2 - glossMod, 0.05, 0.5);
+                    const ringMat = new THREE.MeshStandardMaterial(basicMatOptions);
+
+                    for (let i = 0; i <= numLinks; i++) {
+                        const t = i / numLinks;
+                        const pt = finalCurve.getPointAt(t);
+                        const tangent = finalCurve.getTangentAt(t).normalize();
+
+                        const ring = new THREE.Mesh(ringGeom, ringMat);
+                        pt.x = THREE.MathUtils.clamp(pt.x, -maxWall + finalThickness, maxWall - finalThickness);
+                        pt.y = THREE.MathUtils.clamp(pt.y, -maxWall + finalThickness, maxWall - finalThickness);
+                        pt.z = THREE.MathUtils.clamp(pt.z, -maxWall + finalThickness, maxWall - finalThickness);
+                        ring.position.copy(pt);
+                        ring.lookAt(pt.clone().add(tangent));
+                        
+                        if (i % 2 === 0) ring.rotateZ(Math.PI / 2);
+                        
+                        ring.castShadow = true;
+                        ring.receiveShadow = true;
+                        figure.meshGroup.add(ring);
+                    }
+                } else if (figure.style === 'flat') {
+                    const shape = new THREE.Shape();
+                    const w = finalThickness * 1.8; 
+                    const h = finalThickness * 0.3; 
+                    shape.moveTo(-w, -h);
+                    shape.lineTo(w, -h);
+                    shape.lineTo(w, h);
+                    shape.lineTo(-w, h);
+                    shape.lineTo(-w, -h);
+
+                    const extrudeSettings = {
+                        steps: dynamicSegments,
+                        bevelEnabled: false,
+                        extrudePath: finalCurve
+                    };
+                    const flatGeom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                    
+                    const positions = flatGeom.attributes.position;
+                    for (let i = 0; i < positions.count; i++) {
+                        positions.setXYZ(
+                            i,
+                            THREE.MathUtils.clamp(positions.getX(i), -maxWall, maxWall),
+                            THREE.MathUtils.clamp(positions.getY(i), -maxWall, maxWall),
+                            THREE.MathUtils.clamp(positions.getZ(i), -maxWall, maxWall)
+                        );
+                    }
+                    flatGeom.computeVertexNormals(); 
+
+                    basicMatOptions.roughness = THREE.MathUtils.clamp(0.6 - glossMod, 0.1, 1.0);
+                    const flatMat = new THREE.MeshStandardMaterial(basicMatOptions);
+                    const mesh = new THREE.Mesh(flatGeom, flatMat);
+                    mesh.castShadow = true;     
+                    mesh.receiveShadow = true; 
+                    figure.meshGroup.add(mesh);
+                } else {
+                    let radialSegments = 16;
+                    if (figure.style === 'angular') radialSegments = 4;
+                    if (figure.style === 'wire') { 
+                        basicMatOptions.metalness = THREE.MathUtils.clamp(0.9 + metalMod, 0.4, 1.0); 
+                        basicMatOptions.roughness = THREE.MathUtils.clamp(0.1 - glossMod, 0.01, 0.6); 
+                    }
+                    
+                    if (figure.style === 'wool' || figure.style === 'rope') {
+                        const isWool = figure.style === 'wool';
+                        const tex = generateProceduralTexture(isWool ? 'wool_pattern' : 'rope_pattern', isMonoTube).clone();
+                        tex.needsUpdate = true;
+                        const lengthRepeat = Math.max(1, Math.floor(finalCurve.getLength() * (isWool ? 3.0 : 1.5)));
+                        tex.repeat.set(lengthRepeat, isWool ? 4 : 2);
+                        
+                        basicMatOptions.map = tex;
+                        basicMatOptions.roughness = 1.0; 
+                        basicMatOptions.metalness = 0.0; 
+                        basicMatOptions.color = new THREE.Color(renderColor);
+                    }
+                    
+                    const tubeGeom = new THREE.TubeGeometry(finalCurve, dynamicSegments, finalThickness, radialSegments, false);
+                    
+                    const positions = tubeGeom.attributes.position;
+                    for (let i = 0; i < positions.count; i++) {
+                        positions.setXYZ(
+                            i,
+                            THREE.MathUtils.clamp(positions.getX(i), -maxWall, maxWall),
+                            THREE.MathUtils.clamp(positions.getY(i), -maxWall, maxWall),
+                            THREE.MathUtils.clamp(positions.getZ(i), -maxWall, maxWall)
+                        );
+                    }
+                    tubeGeom.computeVertexNormals(); 
+
+                    const tubeMat = new THREE.MeshStandardMaterial(basicMatOptions);
+                    const mesh = new THREE.Mesh(tubeGeom, tubeMat);
+                    mesh.castShadow = true;     
+                    mesh.receiveShadow = true; 
+                    figure.meshGroup.add(mesh);
+
+                    if (figure.style === 'wool' || figure.style === 'rope') {
+                        const fuzzTex = generateProceduralTexture('fuzz_alpha', isMonoTube).clone();
+                        fuzzTex.needsUpdate = true;
+                        const lengthRepeat = Math.max(1, Math.floor(finalCurve.getLength() * 4.0));
+                        fuzzTex.repeat.set(lengthRepeat, 4);
+
+                        const fuzzMat = new THREE.MeshStandardMaterial({
+                            color: renderColor,
+                            transparent: true,
+                            alphaMap: fuzzTex,
+                            alphaTest: 0.15, 
+                            opacity: 0.85,
+                            roughness: 1.0,
+                            metalness: 0.0,
+                            side: THREE.DoubleSide,
+                            depthWrite: false
+                        });
+                        
+                        const outerRadius = figure.style === 'wool' ? finalThickness + 0.035 : finalThickness + 0.025;
+                        const outerGeom = new THREE.TubeGeometry(finalCurve, dynamicSegments, outerRadius, radialSegments, false);
+                        
+                        const outerPositions = outerGeom.attributes.position;
+                        for (let i = 0; i < outerPositions.count; i++) {
+                            outerPositions.setXYZ(
+                                i,
+                                THREE.MathUtils.clamp(outerPositions.getX(i), -maxWall, maxWall),
+                                THREE.MathUtils.clamp(outerPositions.getY(i), -maxWall, maxWall),
+                                THREE.MathUtils.clamp(outerPositions.getZ(i), -maxWall, maxWall)
+                            );
+                        }
+                        outerGeom.computeVertexNormals();
+
+                        const outerMesh = new THREE.Mesh(outerGeom, fuzzMat);
+                        outerMesh.castShadow = false; 
+                        outerMesh.receiveShadow = true;
+                        figure.meshGroup.add(outerMesh);
+                    }
+                }
+            });
+            
+            autoSave();
+            needsEnvMapUpdate = true;
+        }
+
+        function onPointerDown(event) {
+            if (currentMode !== 'editor') return; 
+
+            if (event.target.closest('.panel') || event.target.closest('.ui-layer button') || event.target.closest('.ui-layer input') || event.target.closest('.ui-layer label') || event.target.closest('#confirm-modal')) return;
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, cameraLeft);
+            const activeFig = getActiveFigure();
+            
+            if(!activeFig) return;
+
+            let intersects = raycaster.intersectObjects(activeFig.controlSpheres);
+
+            if (intersects.length > 0) {
+                selectSphere(intersects[0].object);
+                return;
+            }
+
+            intersects = raycaster.intersectObjects(activeFig.meshGroup.children, true);
+            if (intersects.length > 0 && activeFig.curve) {
+                let hit = intersects[0];
+                let closestT = 0;
+                let minDist = Infinity;
+                const resolution = 200; 
+
+                for (let i = 0; i <= resolution; i++) {
+                    let testT = i / resolution;
+                    let pt = activeFig.curve.getPoint(testT);
+                    let dist = pt.distanceTo(hit.point);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closestT = testT;
+                    }
+                }
+
+                let floatIndex = closestT * (activeFig.controlSpheres.length - 1);
+                let insertIndex = Math.ceil(floatIndex);
+                if (insertIndex === 0) insertIndex = 1; 
+                if (insertIndex > activeFig.controlSpheres.length - 1) insertIndex = activeFig.controlSpheres.length - 1;
+
+                let newPos = hit.point.clone();
+                const maxBound = 3.0 - activeFig.thickness;
+                newPos.x = THREE.MathUtils.clamp(newPos.x, -maxBound, maxBound);
+                newPos.y = THREE.MathUtils.clamp(newPos.y, -maxBound, maxBound);
+                newPos.z = THREE.MathUtils.clamp(newPos.z, -maxBound, maxBound);
+
+                let newSphere = createPointSphere(newPos);
+                activeFig.controlSpheres.splice(insertIndex, 0, newSphere); 
+                
+                selectSphere(newSphere); 
+                updateAllFigures();
+                return;
+            }
+
+            if (!transformControl.axis) {
+                transformControl.detach();
+                if (selectedSphere) {
+                    selectedSphere.material.color.setHex(0x00ff00);
+                    selectedSphere = null;
+                }
+            }
+        }
+
+        function selectSphere(sphere) {
+            if (selectedSphere) selectedSphere.material.color.setHex(0x00ff00); 
+            selectedSphere = sphere;
+            selectedSphere.material.color.setHex(0xffff00); 
+            transformControl.attach(selectedSphere);
+        }
+
+        function onWindowResize() {
+            if (currentMode === 'editor') {
+                cameraLeft.aspect = window.innerWidth / window.innerHeight;
+                cameraLeft.updateProjectionMatrix();
+                rendererLeft.setSize(window.innerWidth, window.innerHeight);
+                
+                if (usePostProcessing) {
+                    composerLeft.setSize(window.innerWidth, window.innerHeight);
+                    if (ssaoPassLeft) ssaoPassLeft.setSize(window.innerWidth, window.innerHeight);
+                    
+                    if (fxaaPassLeft) {
+                        const pixelRatio = rendererLeft.getPixelRatio();
+                        fxaaPassLeft.material.uniforms['resolution'].value.x = 1 / (window.innerWidth * pixelRatio);
+                        fxaaPassLeft.material.uniforms['resolution'].value.y = 1 / (window.innerHeight * pixelRatio);
+                    }
+                }
+            } else {
+                const w = window.innerWidth / 2;
+                const h = window.innerHeight;
+                
+                cameraLeft.aspect = w / h;
+                cameraLeft.updateProjectionMatrix();
+                rendererLeft.setSize(w, h);
+                
+                cameraRight.aspect = w / h;
+                cameraRight.updateProjectionMatrix();
+                rendererRight.setSize(w, h);
+                
+                if (usePostProcessing) {
+                    composerLeft.setSize(w, h);
+                    if (ssaoPassLeft) ssaoPassLeft.setSize(w, h);
+                    
+                    composerRight.setSize(w, h);
+                    if (ssaoPassRight) ssaoPassRight.setSize(w, h);
+                    
+                    if (fxaaPassLeft && fxaaPassRight) {
+                        const pixelRatio = rendererLeft.getPixelRatio();
+                        fxaaPassLeft.material.uniforms['resolution'].value.x = 1 / (w * pixelRatio);
+                        fxaaPassLeft.material.uniforms['resolution'].value.y = 1 / (h * pixelRatio);
+                        
+                        fxaaPassRight.material.uniforms['resolution'].value.x = 1 / (w * pixelRatio);
+                        fxaaPassRight.material.uniforms['resolution'].value.y = 1 / (h * pixelRatio);
+                    }
+                }
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (usePostProcessing) {
+                const distL = cameraLeft.position.distanceTo(controlsLeft.target);
+                bokehPassLeft.uniforms["focus"].value = distL; 
+                
+                const distR = cameraRight.position.distanceTo(controlsRight.target);
+                bokehPassRight.uniforms["focus"].value = distR; 
+            }
+
+            const flatX = THREE.MathUtils.lerp(3, 0.1, flatteningAmount);
+            const flatY = THREE.MathUtils.lerp(6, 0.1, flatteningAmount);
+            const flatZ = THREE.MathUtils.lerp(0, 5, flatteningAmount);
+            
+            dirLightL.position.set(flatX, flatY, flatZ);
+            dirLightR.position.set(flatX, flatY, flatZ);
+            
+            const activeAmbInt = THREE.MathUtils.lerp(currentAmbInt, currentAmbInt + 0.6, flatteningAmount);
+            const activeDirInt = THREE.MathUtils.lerp(currentDirInt, currentDirInt * 0.25, flatteningAmount);
+            
+            ambientLight.intensity = activeAmbInt;
+
+            if (needsEnvMapUpdate) {
+                glassCube.visible = false;
+                dirLightL.intensity = activeDirInt;
+                dirLightR.intensity = 0; 
+
+                cubeCamera.update(rendererLeft, scene);
+                
+                glassCube.visible = true;
+                needsEnvMapUpdate = false;
+            }
+
+            if (currentMode === 'editor') {
+                controlsLeft.update();
+                if (orientationSprites.visible) orientationSprites.children.forEach(s => s.quaternion.copy(cameraLeft.quaternion));
+                
+                dirLightL.intensity = activeDirInt;
+                dirLightL.castShadow = true; 
+                dirLightR.intensity = 0;
+                dirLightR.castShadow = false; 
+                if (usePostProcessing) composerLeft.render(); else rendererLeft.render(scene, cameraLeft);
+            } 
+            else if (currentMode === 'practice' || currentMode === 'selbsttest') {
+                if (currentMode === 'practice') {
+                    controlsLeft.update();
+                    controlsRight.update();
+                }
+                
+                dirLightL.intensity = activeDirInt;
+                dirLightL.castShadow = true; 
+                dirLightR.intensity = 0; 
+                dirLightR.castShadow = false; 
+                if (usePostProcessing) composerLeft.render(); else rendererLeft.render(scene, cameraLeft);
+
+                dirLightL.intensity = 0;
+                dirLightL.castShadow = false; 
+                dirLightR.intensity = activeDirInt; 
+                dirLightR.castShadow = true; 
+                if (usePostProcessing) composerRight.render(); else rendererRight.render(scene, cameraRight);
+            }
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
